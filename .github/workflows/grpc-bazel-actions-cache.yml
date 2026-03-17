@@ -1,0 +1,567 @@
+name: "gRPC Bazel - Actions Cache"
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - ".github/workflows/grpc-bazel-boringcache.yml"
+      - ".github/workflows/grpc-bazel-actions-cache.yml"
+      - "README.md"
+      - "scenarios/**"
+      - "scripts/**"
+      - "upstream"
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  PROJECT_REPO: grpc/grpc
+  PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
+  BENCHMARK_ID: grpc-bazel
+  BENCHMARK_WORKSPACE: boringcache/benchmarks
+  BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
+
+jobs:
+  seed-cache:
+    name: Bazel Seed (actions/cache, cold)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      seed_cache_key: ${{ steps.seed_cache_key.outputs.key }}
+      cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
+      scope_started_at: ${{ steps.scope.outputs.scope_started_at }}
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare base benchmark source tree
+        run: ./scripts/prepare-source.sh base
+
+      - name: Patch gRPC Bazel dependency fallbacks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("upstream/bazel/grpc_python_deps.bzl")
+          text = path.read_text()
+          old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
+          new = '''            urls = [
+                        "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
+                        "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
+                    ],'''
+          if old not in text:
+              raise SystemExit("rules_python source stanza not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cat >> "$HOME/.bazelrc" <<'EOF'
+          common --enable_bzlmod=false
+          common --enable_workspace=true
+          EOF
+
+      - name: Setup Bazel with mise
+        uses: boringcache/one@v1
+        with:
+          setup: mise
+          mode: archive
+          cache-runtime: false
+
+      - name: Prepare benchmark scope
+        id: scope
+        run: |
+          set -euo pipefail
+          cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          cache_key_primary="ac-${cache_scope}-seed1"
+          cache_key_fallback="ac-${cache_scope}-seed2"
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
+          echo "cache_key_primary=${cache_key_primary}" >> "$GITHUB_OUTPUT"
+          echo "cache_key_fallback=${cache_key_fallback}" >> "$GITHUB_OUTPUT"
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-grpc-bazel-build.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          max_attempts=3
+          attempt=1
+          while true; do
+            if (cd upstream && bazel build "$BAZEL_TARGET"); then
+              break
+            fi
+
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "Bazel build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+
+            echo "Bazel build failed (attempt ${attempt}/${max_attempts}); retrying..." >&2
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          SH
+          chmod +x ./run-grpc-bazel-build.sh
+
+      - name: Purge benchmark GHA cache keys
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for key_prefix in "${{ steps.scope.outputs.cache_key_primary }}" "${{ steps.scope.outputs.cache_key_fallback }}"; do
+            page=1
+            while true; do
+              response="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100&page=${page}&key=${key_prefix}" 2>/dev/null || true)"
+              if [[ -z "$response" ]] || ! jq -e '.actions_caches | type == "array"' <<<"$response" >/dev/null 2>&1; then
+                break
+              fi
+              mapfile -t cache_ids < <(jq -r '.actions_caches[].id' <<<"$response")
+              for cache_id in "${cache_ids[@]}"; do
+                gh api -X DELETE "/repos/${GITHUB_REPOSITORY}/actions/caches/${cache_id}" >/dev/null 2>&1 || true
+              done
+              count="$(jq '.actions_caches | length' <<<"$response")"
+              if [[ "$count" -lt 100 ]]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+          done
+
+      - name: Prepare AC write probe
+        run: |
+          set -euo pipefail
+          mkdir -p .bench-cache-probe
+          printf '%s\n' "probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s)" > .bench-cache-probe/probe.txt
+
+      - name: Verify Actions Cache write access
+        id: cache_write_probe
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .bench-cache-probe
+          key: ac-${{ env.BENCHMARK_ID }}-write-probe-r${{ github.run_id }}-a${{ github.run_attempt }}
+
+      - name: Fail early if Actions Cache is read-only
+        if: steps.cache_write_probe.outcome != 'success'
+        run: |
+          echo "Actions Cache write probe failed (likely read-only budget/spending cap)." >&2
+          echo "Cannot produce reliable AC benchmark results until cache writes are enabled." >&2
+          exit 1
+
+      - name: Run cold + seed cache build
+        id: cold_baseline_build
+        run: |
+          set -euo pipefail
+          bazel clean --expunge
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Save seeded Bazel cache (primary key)
+        id: save_seed_primary
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ steps.scope.outputs.cache_key_primary }}
+
+      - name: Save seeded Bazel cache (fallback key)
+        id: save_seed_fallback
+        if: steps.save_seed_primary.outcome != 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ steps.scope.outputs.cache_key_fallback }}
+
+      - name: Resolve seeded cache key
+        id: seed_cache_key
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          primary="${{ steps.scope.outputs.cache_key_primary }}"
+          fallback="${{ steps.scope.outputs.cache_key_fallback }}"
+          key=""
+
+          for candidate in "$primary" "$fallback"; do
+            for _ in $(seq 1 30); do
+              response="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100&key=${candidate}" 2>/dev/null || true)"
+              if [[ -n "$response" ]] && jq -e '.actions_caches | type == "array"' <<<"$response" >/dev/null 2>&1; then
+                matches="$(jq '.actions_caches | length' <<<"$response")"
+                if [[ "$matches" -gt 0 ]]; then
+                  key="$candidate"
+                  break 2
+                fi
+              fi
+              sleep 2
+            done
+          done
+
+          if [[ -z "$key" ]]; then
+            echo "Failed to verify seeded cache key in GHA cache API (likely cache save/read-only budget issue)." >&2
+            echo "Primary save outcome: ${{ steps.save_seed_primary.outcome }}" >&2
+            echo "Fallback save outcome: ${{ steps.save_seed_fallback.outcome }}" >&2
+            exit 1
+          fi
+
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+          echo "Using seeded cache key: ${key}"
+
+
+  scenario-builds:
+    name: Bazel Scenario (${{ matrix.phase }}) (actions/cache)
+    needs: seed-cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        phase: [warm1, warm2, stale-low, stale-mid, stale-high]
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare scenario source tree
+        run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
+
+      - name: Patch gRPC Bazel dependency fallbacks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("upstream/bazel/grpc_python_deps.bzl")
+          text = path.read_text()
+          old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
+          new = '''            urls = [
+                        "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
+                        "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
+                    ],'''
+          if old not in text:
+              raise SystemExit("rules_python source stanza not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cat >> "$HOME/.bazelrc" <<'EOF'
+          common --enable_bzlmod=false
+          common --enable_workspace=true
+          EOF
+
+      - name: Setup Bazel with mise
+        uses: boringcache/one@v1
+        with:
+          setup: mise
+          mode: archive
+          cache-runtime: false
+
+      - name: Prepare benchmark scope
+        id: scope
+        run: |
+          set -euo pipefail
+          cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          cache_key_primary="ac-${cache_scope}-seed1"
+          cache_key_fallback="ac-${cache_scope}-seed2"
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
+          echo "cache_key_primary=${cache_key_primary}" >> "$GITHUB_OUTPUT"
+          echo "cache_key_fallback=${cache_key_fallback}" >> "$GITHUB_OUTPUT"
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-grpc-bazel-build.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          max_attempts=3
+          attempt=1
+          while true; do
+            if (cd upstream && bazel build "$BAZEL_TARGET"); then
+              break
+            fi
+
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "Bazel build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+
+            echo "Bazel build failed (attempt ${attempt}/${max_attempts}); retrying..." >&2
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          SH
+          chmod +x ./run-grpc-bazel-build.sh
+
+      - name: Clean Bazel for warm build 1
+        if: matrix.phase == 'warm1'
+        run: bazel clean --expunge
+
+      - name: Restore cache for warm build 1
+        if: matrix.phase == 'warm1'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ needs.seed-cache.outputs.seed_cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Run warm build 1
+        id: warm1_build
+        if: matrix.phase == 'warm1'
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for warm build 2
+        if: matrix.phase == 'warm2'
+        run: bazel clean --expunge
+
+      - name: Restore cache for warm build 2
+        if: matrix.phase == 'warm2'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ needs.seed-cache.outputs.seed_cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Run warm build 2
+        id: warm2_build
+        if: matrix.phase == 'warm2'
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for stale-low build
+        if: matrix.phase == 'stale-low'
+        run: bazel clean --expunge
+
+      - name: Restore cache for stale-low build
+        if: matrix.phase == 'stale-low'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ needs.seed-cache.outputs.seed_cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Run stale-low build
+        id: stale_low_build
+        if: matrix.phase == 'stale-low'
+        run: |
+          set -euo pipefail
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for stale-mid build
+        if: matrix.phase == 'stale-mid'
+        run: bazel clean --expunge
+
+      - name: Restore cache for stale-mid build
+        if: matrix.phase == 'stale-mid'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ needs.seed-cache.outputs.seed_cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Run stale-mid build
+        id: stale_mid_build
+        if: matrix.phase == 'stale-mid'
+        run: |
+          set -euo pipefail
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for stale-high build
+        if: matrix.phase == 'stale-high'
+        run: bazel clean --expunge
+
+      - name: Restore cache for stale-high build
+        if: matrix.phase == 'stale-high'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cache/bazel
+          key: ${{ needs.seed-cache.outputs.seed_cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Run stale-high build
+        id: stale_high_build
+        if: matrix.phase == 'stale-high'
+        run: |
+          set -euo pipefail
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Capture scenario timing
+        id: phase_timing
+        run: |
+          set -euo pipefail
+          seconds=""
+          case "${{ matrix.phase }}" in
+            warm1)
+              seconds="${{ steps.warm1_build.outputs.seconds }}"
+              ;;
+            warm2)
+              seconds="${{ steps.warm2_build.outputs.seconds }}"
+              ;;
+            stale-low)
+              seconds="${{ steps.stale_low_build.outputs.seconds }}"
+              ;;
+            stale-mid)
+              seconds="${{ steps.stale_mid_build.outputs.seconds }}"
+              ;;
+            stale-high)
+              seconds="${{ steps.stale_high_build.outputs.seconds }}"
+              ;;
+            *)
+              echo "Unknown phase: ${{ matrix.phase }}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "${seconds}" ]]; then
+            echo "No timing captured for phase ${{ matrix.phase }}" >&2
+            exit 1
+          fi
+          echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
+      - name: Persist scenario timing artifact
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-phase
+          cat > "benchmark-phase/${{ matrix.phase }}.env" <<EOF
+          phase=${{ matrix.phase }}
+          seconds=${{ steps.phase_timing.outputs.seconds }}
+          EOF
+      - name: Upload scenario timing artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-actions-cache-${{ matrix.phase }}
+          path: benchmark-phase/${{ matrix.phase }}.env
+          if-no-files-found: error
+
+  finalize-benchmark:
+    name: Finalize benchmark artifacts
+    needs: [seed-cache, scenario-builds]
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download scenario timing artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-actions-cache-*
+          path: benchmark-phase
+          merge-multiple: true
+      - name: Collect scenario timings
+        id: timings
+        run: |
+          set -euo pipefail
+          parse_phase() {
+            local phase="$1"
+            local key="${phase//-/_}"
+            local file="benchmark-phase/${phase}.env"
+            if [[ ! -f "$file" ]]; then
+              echo "Missing timing artifact for phase ${phase}" >&2
+              ls -R benchmark-phase || true
+              exit 1
+            fi
+            local seconds
+            seconds="$(grep "^seconds=" "$file" | head -n1 | cut -d= -f2-)"
+            if [[ -z "${seconds}" ]]; then
+              echo "Timing artifact for phase ${phase} has empty seconds" >&2
+              cat "$file" >&2
+              exit 1
+            fi
+            echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          }
+          parse_phase warm1
+          parse_phase warm2
+          parse_phase stale-low
+          parse_phase stale-mid
+          parse_phase stale-high
+      - name: Measure GHA cache storage usage
+        id: cache_size
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bytes="$(./scripts/sum-gha-cache-by-key.sh "${{ needs.seed-cache.outputs.seed_cache_key }}" "${{ needs.seed-cache.outputs.scope_started_at }}")"
+          echo "bytes=${bytes}" >> "$GITHUB_OUTPUT"
+
+      - name: Write benchmark artifacts
+        id: artifact_files
+        run: |
+          ./scripts/write-benchmark-artifacts.sh \
+            --benchmark "$BENCHMARK_ID" \
+            --strategy "actions-cache" \
+            --project-repo "$PROJECT_REPO" \
+            --project-ref "$PROJECT_REF" \
+            --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
+            --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
+            --warm2-seconds "${{ steps.timings.outputs.warm2_seconds }}" \
+            --stale-low-seconds "${{ steps.timings.outputs.stale_low_seconds }}" \
+            --stale-mid-seconds "${{ steps.timings.outputs.stale_mid_seconds }}" \
+            --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
+            --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
+            --cache-storage-source "github-actions-cache-api" \
+            --hit-behavior-note "Cold+seed run builds from scratch and saves ~/.cache/bazel to actions/cache (primary key with fallback key retry) while recording cold timing. Workflow waits for cache index visibility before warm phases. bazel clean --expunge between warm/stale phases. Warm runs require successful cache restore before building. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache
+          path: |
+            ${{ steps.artifact_files.outputs.json_path }}
+            ${{ steps.artifact_files.outputs.md_path }}
+          if-no-files-found: error
+
+      - name: Publish summary
+        run: cat "${{ steps.artifact_files.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"

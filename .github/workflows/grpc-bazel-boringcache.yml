@@ -1,0 +1,766 @@
+name: "gRPC Bazel - BoringCache"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: "Optional boringcache/cli ref to build and use instead of the released CLI"
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - ".github/workflows/grpc-bazel-boringcache.yml"
+      - ".github/workflows/grpc-bazel-actions-cache.yml"
+      - "README.md"
+      - "scenarios/**"
+      - "scripts/**"
+      - "upstream"
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PROJECT_REPO: grpc/grpc
+  PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
+  BENCHMARK_ID: grpc-bazel
+  BENCHMARK_WORKSPACE: boringcache/benchmarks
+  BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
+  CLI_RUST_VERSION: "1.89"
+  # Run-scoped tag ensures cold build starts with empty remote cache.
+  # boringcache delete can't purge cache-registry proxy data, so we
+  # use a unique tag per run instead.
+  BAZEL_REMOTE_CACHE_TAG: grpc-bazel-remote-cache-r${{ github.run_id }}-a${{ github.run_attempt }}
+
+jobs:
+  prepare-cli:
+    name: Prepare benchmark CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      use_custom_cli: ${{ steps.resolve.outputs.use_custom_cli }}
+      artifact_name: ${{ steps.resolve.outputs.artifact_name }}
+      cli_source: ${{ steps.metadata.outputs.cli_source }}
+      cli_ref: ${{ steps.metadata.outputs.cli_ref }}
+    steps:
+      - name: Resolve CLI source
+        id: resolve
+        run: |
+          set -euo pipefail
+          requested_ref="${{ github.event.inputs.cli_ref || '' }}"
+          if [[ -n "$requested_ref" ]]; then
+            echo "use_custom_cli=true" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=boringcache-cli-linux-amd64" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_custom_cli=false" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=" >> "$GITHUB_OUTPUT"
+          fi
+          echo "requested_ref=${requested_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout CLI repo
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: boringcache/cli
+          ref: ${{ steps.resolve.outputs.requested_ref }}
+
+      - name: Setup Rust for custom CLI build
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: rust-sccache
+          tools: rust@${{ env.CLI_RUST_VERSION }}
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: .
+          cache-runtime: false
+          cache-cargo: false
+          cache-target: false
+          sccache: false
+
+      - name: Capture resolved CLI ref
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        id: resolved_ref
+        run: |
+          set -euo pipefail
+          echo "cli_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build custom CLI
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        run: cargo build --release --locked
+
+      - name: Upload custom CLI artifact
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.resolve.outputs.artifact_name }}
+          path: target/release/boringcache
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Finalize CLI metadata
+        id: metadata
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.resolve.outputs.use_custom_cli }}" == "true" ]]; then
+            echo "cli_source=custom" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=${{ steps.resolved_ref.outputs.cli_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "cli_source=release" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+  seed-cache:
+    name: Bazel Seed (BoringCache, cold)
+    needs: prepare-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    outputs:
+      tags_csv: ${{ steps.scope.outputs.tags_csv }}
+      cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare base benchmark source tree
+        run: ./scripts/prepare-source.sh base
+
+      - name: Patch gRPC Bazel dependency fallbacks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("upstream/bazel/grpc_python_deps.bzl")
+          text = path.read_text()
+          old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
+          new = '''            urls = [
+                        "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
+                        "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
+                    ],'''
+          if old not in text:
+              raise SystemExit("rules_python source stanza not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cat >> "$HOME/.bazelrc" <<'EOF'
+          common --enable_bzlmod=false
+          common --enable_workspace=true
+          EOF
+
+      - name: Download custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-cli.outputs.artifact_name }}
+          path: ${{ runner.temp }}/boringcache-cli-artifact
+
+      - name: Install custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
+
+      - name: Prepare benchmark helpers
+        id: scope
+        run: |
+          set -euo pipefail
+
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          tag_bazel="${BAZEL_REMOTE_CACHE_TAG}"
+          tags_csv="${tag_bazel}"
+
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+          echo "tag_bazel=${tag_bazel}" >> "$GITHUB_OUTPUT"
+          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-grpc-bazel-build.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          max_attempts=3
+          attempt=1
+          while true; do
+            if (cd upstream && bazel build "$@" "$BAZEL_TARGET"); then
+              break
+            fi
+
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "Bazel build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+
+            echo "Bazel build failed (attempt ${attempt}/${max_attempts}); retrying..." >&2
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          SH
+          chmod +x ./run-grpc-bazel-build.sh
+
+      - name: Configure boringcache/one
+        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
+        id: bazel_cache_release
+        uses: boringcache/one@v1
+        with:
+          setup: mise
+          mode: bazel
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_MAX_SPOOL_BYTES: "2147483648"
+          BORINGCACHE_KV_BLOB_UPLOAD_CONCURRENCY: "64"
+          BORINGCACHE_FLUSH_BLOB_THRESHOLD: "2000"
+          BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "64"
+          BORINGCACHE_PROXY_METADATA_HINTS: "project=grpc,phase=seed"
+
+      - name: Configure boringcache/one with custom CLI
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        id: bazel_cache_custom
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: bazel
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_MAX_SPOOL_BYTES: "2147483648"
+          BORINGCACHE_KV_BLOB_UPLOAD_CONCURRENCY: "64"
+          BORINGCACHE_FLUSH_BLOB_THRESHOLD: "2000"
+          BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "64"
+          BORINGCACHE_PROXY_METADATA_HINTS: "project=grpc,phase=seed"
+
+      - name: Tune Bazel for remote cache performance
+        run: |
+          cat >> ~/.bazelrc <<'EOF'
+          # Benchmark tuning (will be set by bazel-action in future)
+          build --remote_cache_async=false
+          build --remote_download_minimal
+          build --jobs=256
+          build --remote_max_connections=64
+          build --experimental_remote_cache_eviction_retries=5
+          EOF
+
+      - name: Run cold + seed cache build
+        id: cold_baseline_build
+        run: |
+          set -euo pipefail
+          bazel clean --expunge
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Flush Bazel server state
+        if: always()
+        run: bazel shutdown || true
+
+      - name: Collect BoringCache diagnostics
+        if: always()
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ./scripts/collect-boringcache-diagnostics.sh \
+            --output-dir "boringcache-diag-seed" \
+            --workspace "$BENCHMARK_WORKSPACE" \
+            --tags "$BAZEL_REMOTE_CACHE_TAG" \
+            --phase "seed" \
+            --cache-tag "$BAZEL_REMOTE_CACHE_TAG" \
+            --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
+            --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
+            --proxy-port "${{ steps.bazel_cache_release.outputs.proxy-port || steps.bazel_cache_custom.outputs.proxy-port }}" \
+            --proxy-log-path "${{ steps.bazel_cache_release.outputs.proxy-log-path || steps.bazel_cache_custom.outputs.proxy-log-path }}" \
+            --cache-root "$HOME/.cache/bazel" \
+            --cache-label "bazel-cache"
+
+      - name: Upload BoringCache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-seed-boringcache
+          path: boringcache-diag-seed
+          if-no-files-found: warn
+
+
+  scenario-builds:
+    name: Bazel Scenario (${{ matrix.phase }}) (BoringCache)
+    needs: [prepare-cli, seed-cache]
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        phase: [warm1, warm2, stale-low, stale-mid, stale-high]
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare scenario source tree
+        run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
+
+      - name: Patch gRPC Bazel dependency fallbacks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("upstream/bazel/grpc_python_deps.bzl")
+          text = path.read_text()
+          old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
+          new = '''            urls = [
+                        "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
+                        "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
+                    ],'''
+          if old not in text:
+              raise SystemExit("rules_python source stanza not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cat >> "$HOME/.bazelrc" <<'EOF'
+          common --enable_bzlmod=false
+          common --enable_workspace=true
+          EOF
+
+      - name: Download custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-cli.outputs.artifact_name }}
+          path: ${{ runner.temp }}/boringcache-cli-artifact
+
+      - name: Install custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
+
+      - name: Prepare benchmark helpers
+        id: scope
+        run: |
+          set -euo pipefail
+
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          tag_bazel="${BAZEL_REMOTE_CACHE_TAG}"
+          tags_csv="${tag_bazel}"
+
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+          echo "tag_bazel=${tag_bazel}" >> "$GITHUB_OUTPUT"
+          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-grpc-bazel-build.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          max_attempts=3
+          attempt=1
+          while true; do
+            if (cd upstream && bazel build "$@" "$BAZEL_TARGET"); then
+              break
+            fi
+
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "Bazel build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+
+            echo "Bazel build failed (attempt ${attempt}/${max_attempts}); retrying..." >&2
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          SH
+          chmod +x ./run-grpc-bazel-build.sh
+
+      - name: Capture proxy setup start
+        id: proxy_setup_timer_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure boringcache/one
+        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
+        id: bazel_cache_release
+        uses: boringcache/one@v1
+        with:
+          setup: mise
+          mode: bazel
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          read-only: true
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_PROXY_METADATA_HINTS: "project=grpc,phase=${{ matrix.phase }}"
+
+      - name: Configure boringcache/one with custom CLI
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        id: bazel_cache_custom
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: bazel
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          read-only: true
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_PROXY_METADATA_HINTS: "project=grpc,phase=${{ matrix.phase }}"
+
+      - name: Capture proxy ready timing
+        id: proxy_ready_timing
+        run: |
+          set -euo pipefail
+          start="${{ steps.proxy_setup_timer_start.outputs.started_at }}"
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Tune Bazel for remote cache performance
+        run: |
+          cat >> ~/.bazelrc <<'EOF'
+          # Benchmark tuning (will be set by bazel-action in future)
+          build --remote_cache_async=false
+          build --remote_download_minimal
+          build --jobs=256
+          build --remote_max_connections=64
+          build --experimental_remote_cache_eviction_retries=5
+          EOF
+
+      - name: Clean Bazel for warm build 1
+        if: matrix.phase == 'warm1'
+        run: bazel clean --expunge
+
+      - name: Run warm build 1
+        id: warm1_build
+        if: matrix.phase == 'warm1'
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh --profile=/tmp/bazel-warm1-profile.gz 2>&1 | tee /tmp/bazel-warm1-build.log
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for warm build 2
+        if: matrix.phase == 'warm2'
+        run: bazel clean --expunge
+
+      - name: Run warm build 2
+        id: warm2_build
+        if: matrix.phase == 'warm2'
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for stale-low build
+        if: matrix.phase == 'stale-low'
+        run: bazel clean --expunge
+
+      - name: Run stale-low build
+        id: stale_low_build
+        if: matrix.phase == 'stale-low'
+        run: |
+          set -euo pipefail
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for stale-mid build
+        if: matrix.phase == 'stale-mid'
+        run: bazel clean --expunge
+
+      - name: Run stale-mid build
+        id: stale_mid_build
+        if: matrix.phase == 'stale-mid'
+        run: |
+          set -euo pipefail
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for stale-high build
+        if: matrix.phase == 'stale-high'
+        run: bazel clean --expunge
+
+      - name: Run stale-high build
+        id: stale_high_build
+        if: matrix.phase == 'stale-high'
+        run: |
+          set -euo pipefail
+
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Flush Bazel server state
+        if: always()
+        run: bazel shutdown || true
+
+      - name: Upload Bazel profile
+        if: matrix.phase == 'warm1' && (always())
+        uses: actions/upload-artifact@v6
+        with:
+          name: bazel-warm1-profile
+          path: /tmp/bazel-warm1-profile.gz
+          if-no-files-found: warn
+
+      - name: Collect BoringCache diagnostics
+        if: always()
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ./scripts/collect-boringcache-diagnostics.sh \
+            --output-dir "boringcache-diag-${{ matrix.phase }}" \
+            --workspace "$BENCHMARK_WORKSPACE" \
+            --tags "$BAZEL_REMOTE_CACHE_TAG" \
+            --phase "${{ matrix.phase }}" \
+            --cache-tag "$BAZEL_REMOTE_CACHE_TAG" \
+            --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
+            --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
+            --proxy-port "${{ steps.bazel_cache_release.outputs.proxy-port || steps.bazel_cache_custom.outputs.proxy-port }}" \
+            --proxy-log-path "${{ steps.bazel_cache_release.outputs.proxy-log-path || steps.bazel_cache_custom.outputs.proxy-log-path }}" \
+            --cache-root "$HOME/.cache/bazel" \
+            --cache-label "bazel-cache"
+
+      - name: Summarize Bazel miss profile
+        if: matrix.phase == 'warm1' && (always())
+        run: |
+          set -euo pipefail
+          out_dir="boringcache-diag-${{ matrix.phase }}"
+          mkdir -p "$out_dir"
+          if [[ -f /tmp/bazel-warm1-build.log ]]; then
+            cp /tmp/bazel-warm1-build.log "${out_dir}/bazel-warm1-build.log"
+          fi
+          if [[ -f /tmp/bazel-warm1-profile.gz ]]; then
+            cp /tmp/bazel-warm1-profile.gz "${out_dir}/bazel-warm1-profile.gz"
+            python3 ./scripts/summarize-bazel-profile.py \
+              --profile /tmp/bazel-warm1-profile.gz \
+              --build-log /tmp/bazel-warm1-build.log \
+              --output-dir "$out_dir" \
+              --phase "${{ matrix.phase }}"
+          fi
+
+      - name: Upload BoringCache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ matrix.phase }}-boringcache
+          path: boringcache-diag-${{ matrix.phase }}
+          if-no-files-found: warn
+
+      - name: Capture scenario timing
+        id: phase_timing
+        run: |
+          set -euo pipefail
+          build_seconds=""
+          case "${{ matrix.phase }}" in
+            warm1)
+              build_seconds="${{ steps.warm1_build.outputs.seconds }}"
+              ;;
+            warm2)
+              build_seconds="${{ steps.warm2_build.outputs.seconds }}"
+              ;;
+            stale-low)
+              build_seconds="${{ steps.stale_low_build.outputs.seconds }}"
+              ;;
+            stale-mid)
+              build_seconds="${{ steps.stale_mid_build.outputs.seconds }}"
+              ;;
+            stale-high)
+              build_seconds="${{ steps.stale_high_build.outputs.seconds }}"
+              ;;
+            *)
+              echo "Unknown phase: ${{ matrix.phase }}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "${build_seconds}" ]]; then
+            echo "No timing captured for phase ${{ matrix.phase }}" >&2
+            exit 1
+          fi
+          restore_seconds=0
+          proxy_ready_seconds="${{ steps.proxy_ready_timing.outputs.seconds }}"
+          seconds="${build_seconds}"
+          end_to_end_seconds=$((restore_seconds + proxy_ready_seconds + build_seconds))
+          echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          echo "restore_seconds=${restore_seconds}" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=${proxy_ready_seconds}" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
+          echo "end_to_end_seconds=${end_to_end_seconds}" >> "$GITHUB_OUTPUT"
+      - name: Persist scenario timing artifact
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-phase
+          cat > "benchmark-phase/${{ matrix.phase }}.env" <<EOF
+          phase=${{ matrix.phase }}
+          seconds=${{ steps.phase_timing.outputs.seconds }}
+          restore_seconds=${{ steps.phase_timing.outputs.restore_seconds }}
+          proxy_ready_seconds=${{ steps.phase_timing.outputs.proxy_ready_seconds }}
+          build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
+          end_to_end_seconds=${{ steps.phase_timing.outputs.end_to_end_seconds }}
+          EOF
+      - name: Upload scenario timing artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-${{ matrix.phase }}
+          path: benchmark-phase/${{ matrix.phase }}.env
+          if-no-files-found: error
+
+  finalize-benchmark:
+    name: Finalize benchmark artifacts
+    needs: [prepare-cli, seed-cache, scenario-builds]
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Install BoringCache CLI with boringcache/one
+        uses: boringcache/one@v1
+        with:
+          setup: none
+          mode: archive
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-platform: linux-amd64
+          cache-runtime: false
+
+      - name: Download custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-cli.outputs.artifact_name }}
+          path: ${{ runner.temp }}/boringcache-cli-artifact
+
+      - name: Install custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
+
+      - name: Verify BoringCache CLI
+        run: boringcache --version
+
+      - name: Download scenario timing artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-*
+          path: benchmark-phase
+          merge-multiple: true
+      - name: Collect scenario timings
+        id: timings
+        run: |
+          set -euo pipefail
+          parse_phase() {
+            local phase="$1"
+            local key="${phase//-/_}"
+            local file="benchmark-phase/${phase}.env"
+            if [[ ! -f "$file" ]]; then
+              echo "Missing timing artifact for phase ${phase}" >&2
+              ls -R benchmark-phase || true
+              exit 1
+            fi
+            local seconds
+            seconds="$(grep "^seconds=" "$file" | head -n1 | cut -d= -f2-)"
+            if [[ -z "${seconds}" ]]; then
+              echo "Timing artifact for phase ${phase} has empty seconds" >&2
+              cat "$file" >&2
+              exit 1
+            fi
+            echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          }
+          parse_phase warm1
+          parse_phase warm2
+          parse_phase stale-low
+          parse_phase stale-mid
+          parse_phase stale-high
+      - name: Measure BoringCache storage usage
+        id: cache_size
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
+          bytes="$(./scripts/sum-boringcache-check-sizes.sh "$BENCHMARK_WORKSPACE" "$tags_csv")"
+          echo "bytes=${bytes}" >> "$GITHUB_OUTPUT"
+
+      - name: Write benchmark artifacts
+        id: artifact_files
+        run: |
+          ./scripts/write-benchmark-artifacts.sh \
+            --benchmark "$BENCHMARK_ID" \
+            --strategy "boringcache" \
+            --project-repo "$PROJECT_REPO" \
+            --project-ref "$PROJECT_REF" \
+            --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
+            --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
+            --warm2-seconds "${{ steps.timings.outputs.warm2_seconds }}" \
+            --stale-low-seconds "${{ steps.timings.outputs.stale_low_seconds }}" \
+            --stale-mid-seconds "${{ steps.timings.outputs.stale_mid_seconds }}" \
+            --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
+            --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
+            --cache-storage-source "boringcache-check" \
+            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. boringcache/one in mode=bazel starts cache-registry proxy and writes ~/.bazelrc with --remote_cache. bazel clean --expunge between warm/stale phases. Warm runs hit the proxy-backed remote cache for action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+
+      - name: Write phase timing breakdown
+        id: phase_breakdown
+        run: |
+          python3 ./scripts/write-phase-timing-breakdown.py \
+            --benchmark "$BENCHMARK_ID" \
+            --strategy "boringcache" \
+            --phase-dir benchmark-phase \
+            --output-dir benchmark-results
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache
+          path: |
+            ${{ steps.artifact_files.outputs.json_path }}
+            ${{ steps.artifact_files.outputs.md_path }}
+            ${{ steps.phase_breakdown.outputs.json_path }}
+            ${{ steps.phase_breakdown.outputs.md_path }}
+          if-no-files-found: error
+
+      - name: Publish summary
+        run: |
+          cat "${{ steps.artifact_files.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "${{ steps.phase_breakdown.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,10 @@
+diff --git a/examples/cpp/auth/helper.cc b/examples/cpp/auth/helper.cc
+index b2b9e56853..f6169ef460 100644
+--- a/examples/cpp/auth/helper.cc
++++ b/examples/cpp/auth/helper.cc
+@@ -32,3 +32,5 @@ std::string LoadStringFromFile(std::string path) {
+   sstr << file.rdbuf();
+   return sstr.str();
+ }
++
++// benchmark stale mutation low
