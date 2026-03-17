@@ -166,7 +166,7 @@ jobs:
         id: cold_baseline_build
         run: |
           set -euo pipefail
-          bazel clean --expunge
+          (cd upstream && bazel clean --expunge)
 
           start="$(date +%s)"
           ./run-grpc-bazel-build.sh
@@ -321,7 +321,7 @@ jobs:
 
       - name: Clean Bazel for warm build 1
         if: matrix.phase == 'warm1'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Restore cache for warm build 1
         if: matrix.phase == 'warm1'
@@ -344,7 +344,7 @@ jobs:
 
       - name: Clean Bazel for warm build 2
         if: matrix.phase == 'warm2'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Restore cache for warm build 2
         if: matrix.phase == 'warm2'
@@ -367,7 +367,7 @@ jobs:
 
       - name: Clean Bazel for stale-low build
         if: matrix.phase == 'stale-low'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Restore cache for stale-low build
         if: matrix.phase == 'stale-low'
@@ -391,7 +391,7 @@ jobs:
 
       - name: Clean Bazel for stale-mid build
         if: matrix.phase == 'stale-mid'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Restore cache for stale-mid build
         if: matrix.phase == 'stale-mid'
@@ -415,7 +415,7 @@ jobs:
 
       - name: Clean Bazel for stale-high build
         if: matrix.phase == 'stale-high'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Restore cache for stale-high build
         if: matrix.phase == 'stale-high'

@@ -263,7 +263,7 @@ jobs:
         id: cold_baseline_build
         run: |
           set -euo pipefail
-          bazel clean --expunge
+          (cd upstream && bazel clean --expunge)
 
           start="$(date +%s)"
           ./run-grpc-bazel-build.sh
@@ -272,7 +272,7 @@ jobs:
 
       - name: Flush Bazel server state
         if: always()
-        run: bazel shutdown || true
+        run: (cd upstream && bazel shutdown) || true
 
       - name: Collect BoringCache diagnostics
         if: always()
@@ -455,7 +455,7 @@ jobs:
 
       - name: Clean Bazel for warm build 1
         if: matrix.phase == 'warm1'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Run warm build 1
         id: warm1_build
@@ -469,7 +469,7 @@ jobs:
 
       - name: Clean Bazel for warm build 2
         if: matrix.phase == 'warm2'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Run warm build 2
         id: warm2_build
@@ -483,7 +483,7 @@ jobs:
 
       - name: Clean Bazel for stale-low build
         if: matrix.phase == 'stale-low'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Run stale-low build
         id: stale_low_build
@@ -498,7 +498,7 @@ jobs:
 
       - name: Clean Bazel for stale-mid build
         if: matrix.phase == 'stale-mid'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Run stale-mid build
         id: stale_mid_build
@@ -513,7 +513,7 @@ jobs:
 
       - name: Clean Bazel for stale-high build
         if: matrix.phase == 'stale-high'
-        run: bazel clean --expunge
+        run: (cd upstream && bazel clean --expunge)
 
       - name: Run stale-high build
         id: stale_high_build
@@ -528,7 +528,7 @@ jobs:
 
       - name: Flush Bazel server state
         if: always()
-        run: bazel shutdown || true
+        run: (cd upstream && bazel shutdown) || true
 
       - name: Upload Bazel profile
         if: matrix.phase == 'warm1' && (always())
