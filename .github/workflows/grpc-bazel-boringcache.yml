@@ -28,6 +28,7 @@ env:
   PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
+  CLI_RELEASE_TAG: "v1.12.17"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "16"
@@ -222,10 +223,12 @@ jobs:
         id: bazel_cache_release
         uses: boringcache/one@v1
         with:
+          cli-version: ${{ env.CLI_RELEASE_TAG }}
           setup: mise
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          cache-runtime: false
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -245,6 +248,7 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          cache-runtime: false
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -414,10 +418,12 @@ jobs:
         id: bazel_cache_release
         uses: boringcache/one@v1
         with:
+          cli-version: ${{ env.CLI_RELEASE_TAG }}
           setup: mise
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          cache-runtime: false
           read-only: true
           verbose: true
         env:
@@ -434,6 +440,7 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
+          cache-runtime: false
           read-only: true
           verbose: true
         env:
@@ -659,14 +666,12 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Install BoringCache CLI with boringcache/one
-        uses: boringcache/one@v1
-        with:
-          setup: none
-          mode: archive
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cli-platform: linux-amd64
-          cache-runtime: false
+      - name: Install released BoringCache CLI
+        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --release-tag "${{ env.CLI_RELEASE_TAG }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
