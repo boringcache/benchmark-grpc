@@ -28,7 +28,7 @@ env:
   PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
-  CLI_RELEASE_TAG: "v1.12.17"
+  CLI_RELEASE_TAG: "v1.12.19"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "16"
