@@ -229,6 +229,12 @@ jobs:
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
           cache-runtime: false
+          proxy-no-git: true
+          proxy-no-platform: true
+          bazelrc-lines: |
+            build --remote_cache_async=false
+            build --jobs=256
+            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -249,6 +255,12 @@ jobs:
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
           cache-runtime: false
+          proxy-no-git: true
+          proxy-no-platform: true
+          bazelrc-lines: |
+            build --remote_cache_async=false
+            build --jobs=256
+            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -257,17 +269,6 @@ jobs:
           BORINGCACHE_KV_BLOB_UPLOAD_CONCURRENCY: "64"
           BORINGCACHE_FLUSH_BLOB_THRESHOLD: "2000"
           BORINGCACHE_PROXY_METADATA_HINTS: "project=grpc,phase=seed"
-
-      - name: Tune Bazel for remote cache performance
-        run: |
-          cat >> ~/.bazelrc <<'EOF'
-          # Benchmark tuning (will be set by bazel-action in future)
-          build --remote_cache_async=false
-          build --remote_download_minimal
-          build --jobs=256
-          build --remote_max_connections=64
-          build --experimental_remote_cache_eviction_retries=5
-          EOF
 
       - name: Run cold + seed cache build
         id: cold_baseline_build
@@ -425,6 +426,13 @@ jobs:
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
           cache-runtime: false
           read-only: true
+          save-policy: off
+          proxy-no-git: true
+          proxy-no-platform: true
+          bazelrc-lines: |
+            build --remote_cache_async=false
+            build --jobs=256
+            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -442,6 +450,13 @@ jobs:
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
           cache-runtime: false
           read-only: true
+          save-policy: off
+          proxy-no-git: true
+          proxy-no-platform: true
+          bazelrc-lines: |
+            build --remote_cache_async=false
+            build --jobs=256
+            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -454,17 +469,6 @@ jobs:
           start="${{ steps.proxy_setup_timer_start.outputs.started_at }}"
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
-
-      - name: Tune Bazel for remote cache performance
-        run: |
-          cat >> ~/.bazelrc <<'EOF'
-          # Benchmark tuning (will be set by bazel-action in future)
-          build --remote_cache_async=false
-          build --remote_download_minimal
-          build --jobs=256
-          build --remote_max_connections=64
-          build --experimental_remote_cache_eviction_retries=5
-          EOF
 
       - name: Clean Bazel for warm build 1
         if: matrix.phase == 'warm1'
