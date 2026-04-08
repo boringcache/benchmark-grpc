@@ -202,10 +202,6 @@ jobs:
           cache-runtime: false
           proxy-no-git: true
           proxy-no-platform: true
-          bazelrc-lines: |
-            build --remote_cache_async=false
-            build --jobs=256
-            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -224,10 +220,6 @@ jobs:
           cache-runtime: false
           proxy-no-git: true
           proxy-no-platform: true
-          bazelrc-lines: |
-            build --remote_cache_async=false
-            build --jobs=256
-            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -371,10 +363,6 @@ jobs:
           save-policy: off
           proxy-no-git: true
           proxy-no-platform: true
-          bazelrc-lines: |
-            build --remote_cache_async=false
-            build --jobs=256
-            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -394,10 +382,6 @@ jobs:
           save-policy: off
           proxy-no-git: true
           proxy-no-platform: true
-          bazelrc-lines: |
-            build --remote_cache_async=false
-            build --jobs=256
-            build --experimental_remote_cache_eviction_retries=5
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
