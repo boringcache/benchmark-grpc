@@ -52,27 +52,6 @@ jobs:
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
-      - name: Patch gRPC Bazel dependency fallbacks
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("upstream/bazel/grpc_python_deps.bzl")
-          text = path.read_text()
-          old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
-          new = '''            urls = [
-                        "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
-                        "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
-                    ],'''
-          if old not in text:
-              raise SystemExit("rules_python source stanza not found")
-          path.write_text(text.replace(old, new, 1))
-          PY
-          cat >> "$HOME/.bazelrc" <<'EOF'
-          common --enable_bzlmod=false
-          common --enable_workspace=true
-          EOF
-
       - name: Setup Bazel with mise
         uses: boringcache/one@v1
         with:
@@ -254,27 +233,6 @@ jobs:
 
       - name: Prepare scenario source tree
         run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
-
-      - name: Patch gRPC Bazel dependency fallbacks
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("upstream/bazel/grpc_python_deps.bzl")
-          text = path.read_text()
-          old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
-          new = '''            urls = [
-                        "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
-                        "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
-                    ],'''
-          if old not in text:
-              raise SystemExit("rules_python source stanza not found")
-          path.write_text(text.replace(old, new, 1))
-          PY
-          cat >> "$HOME/.bazelrc" <<'EOF'
-          common --enable_bzlmod=false
-          common --enable_workspace=true
-          EOF
 
       - name: Setup Bazel with mise
         uses: boringcache/one@v1
