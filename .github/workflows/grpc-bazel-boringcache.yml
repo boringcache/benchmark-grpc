@@ -28,7 +28,7 @@ env:
   PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
-  CLI_RELEASE_TAG: "v1.12.19"
+  CLI_RELEASE_TAG: "v1.12.26"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
   # Run-scoped tag ensures cold build starts with empty remote cache.
@@ -344,6 +344,9 @@ jobs:
           SH
           chmod +x ./run-grpc-bazel-build.sh
 
+      - name: Reset Bazel local state before restore
+        run: (cd upstream && bazel clean --expunge)
+
       - name: Capture proxy setup start
         id: proxy_setup_timer_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
@@ -394,10 +397,6 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Clean Bazel for warm build 1
-        if: matrix.phase == 'warm1'
-        run: (cd upstream && bazel clean --expunge)
-
       - name: Run warm build 1
         id: warm1_build
         if: matrix.phase == 'warm1'
@@ -408,10 +407,6 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Clean Bazel for warm build 2
-        if: matrix.phase == 'warm2'
-        run: (cd upstream && bazel clean --expunge)
-
       - name: Run warm build 2
         id: warm2_build
         if: matrix.phase == 'warm2'
@@ -421,10 +416,6 @@ jobs:
           ./run-grpc-bazel-build.sh
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
-
-      - name: Clean Bazel for stale-low build
-        if: matrix.phase == 'stale-low'
-        run: (cd upstream && bazel clean --expunge)
 
       - name: Run stale-low build
         id: stale_low_build
@@ -437,10 +428,6 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Clean Bazel for stale-mid build
-        if: matrix.phase == 'stale-mid'
-        run: (cd upstream && bazel clean --expunge)
-
       - name: Run stale-mid build
         id: stale_mid_build
         if: matrix.phase == 'stale-mid'
@@ -451,10 +438,6 @@ jobs:
           ./run-grpc-bazel-build.sh
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
-
-      - name: Clean Bazel for stale-high build
-        if: matrix.phase == 'stale-high'
-        run: (cd upstream && bazel clean --expunge)
 
       - name: Run stale-high build
         id: stale_high_build
@@ -676,7 +659,7 @@ jobs:
             --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. boringcache/one in mode=bazel starts cache-registry proxy and writes ~/.bazelrc with --remote_cache. bazel clean --expunge between warm/stale phases. Warm runs hit the proxy-backed remote cache for action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Warm/stale phases start by running bazel clean --expunge, then boringcache/one in mode=bazel restores saved local Bazel state and starts cache-registry proxy before the build begins. Warm runs reuse restored local Bazel state plus proxy-backed remote action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
 
       - name: Write phase timing breakdown
         id: phase_breakdown
