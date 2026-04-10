@@ -24,6 +24,7 @@ env:
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
+  BAZEL_OUTPUT_USER_ROOT: "${{ runner.temp }}/boringcache-bazel-root"
 
 jobs:
   seed-cache:
@@ -145,7 +146,7 @@ jobs:
         id: cold_baseline_build
         run: |
           set -euo pipefail
-          (cd upstream && bazel clean --expunge)
+          rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
           start="$(date +%s)"
           ./run-grpc-bazel-build.sh
@@ -158,7 +159,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ steps.scope.outputs.cache_key_primary }}
 
       - name: Save seeded Bazel cache (fallback key)
@@ -168,7 +169,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ steps.scope.outputs.cache_key_fallback }}
 
       - name: Resolve seeded cache key
@@ -279,14 +280,14 @@ jobs:
 
       - name: Clean Bazel for warm build 1
         if: matrix.phase == 'warm1'
-        run: (cd upstream && bazel clean --expunge)
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
       - name: Restore cache for warm build 1
         if: matrix.phase == 'warm1'
         uses: actions/cache/restore@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
@@ -302,14 +303,14 @@ jobs:
 
       - name: Clean Bazel for warm build 2
         if: matrix.phase == 'warm2'
-        run: (cd upstream && bazel clean --expunge)
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
       - name: Restore cache for warm build 2
         if: matrix.phase == 'warm2'
         uses: actions/cache/restore@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
@@ -325,14 +326,14 @@ jobs:
 
       - name: Clean Bazel for stale-low build
         if: matrix.phase == 'stale-low'
-        run: (cd upstream && bazel clean --expunge)
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
       - name: Restore cache for stale-low build
         if: matrix.phase == 'stale-low'
         uses: actions/cache/restore@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
@@ -349,14 +350,14 @@ jobs:
 
       - name: Clean Bazel for stale-mid build
         if: matrix.phase == 'stale-mid'
-        run: (cd upstream && bazel clean --expunge)
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
       - name: Restore cache for stale-mid build
         if: matrix.phase == 'stale-mid'
         uses: actions/cache/restore@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
@@ -373,14 +374,14 @@ jobs:
 
       - name: Clean Bazel for stale-high build
         if: matrix.phase == 'stale-high'
-        run: (cd upstream && bazel clean --expunge)
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
       - name: Restore cache for stale-high build
         if: matrix.phase == 'stale-high'
         uses: actions/cache/restore@v5
         with:
           path: |
-            ~/.cache/bazel
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
@@ -510,7 +511,7 @@ jobs:
             --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
-            --hit-behavior-note "Cold+seed run builds from scratch and saves ~/.cache/bazel to actions/cache (primary key with fallback key retry) while recording cold timing. Workflow waits for cache index visibility before warm phases. bazel clean --expunge between warm/stale phases. Warm runs require successful cache restore before building. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+            --hit-behavior-note "Cold+seed run builds from scratch and saves the dedicated BAZEL_OUTPUT_USER_ROOT path to actions/cache (primary key with fallback key retry) while recording cold timing. Both strategies use a dedicated BAZEL_OUTPUT_USER_ROOT under the runner temp directory so local Bazel state is isolated and fully restorable. Workflow waits for cache index visibility before warm phases. Warm/stale phases delete that dedicated local state root, restore the seeded cache, then build. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6

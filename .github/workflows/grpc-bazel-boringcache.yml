@@ -31,6 +31,7 @@ env:
   CLI_RELEASE_TAG: "v1.12.26"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
+  BAZEL_OUTPUT_USER_ROOT: "${{ runner.temp }}/boringcache-bazel-root"
   # Run-scoped tag ensures cold build starts with empty remote cache.
   # boringcache delete can't purge cache-registry proxy data, so we
   # use a unique tag per run instead.
@@ -229,7 +230,7 @@ jobs:
         id: cold_baseline_build
         run: |
           set -euo pipefail
-          (cd upstream && bazel clean --expunge)
+          rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
           start="$(date +%s)"
           ./run-grpc-bazel-build.sh
@@ -256,7 +257,7 @@ jobs:
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
             --proxy-port "${{ steps.bazel_cache_release.outputs.proxy-port || steps.bazel_cache_custom.outputs.proxy-port }}" \
             --proxy-log-path "${{ steps.bazel_cache_release.outputs.proxy-log-path || steps.bazel_cache_custom.outputs.proxy-log-path }}" \
-            --cache-root "$HOME/.cache/bazel" \
+            --cache-root "$BAZEL_OUTPUT_USER_ROOT" \
             --cache-label "bazel-cache"
 
       - name: Upload BoringCache diagnostics
@@ -345,7 +346,7 @@ jobs:
           chmod +x ./run-grpc-bazel-build.sh
 
       - name: Reset Bazel local state before restore
-        run: (cd upstream && bazel clean --expunge)
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
       - name: Capture proxy setup start
         id: proxy_setup_timer_start
@@ -478,7 +479,7 @@ jobs:
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
             --proxy-port "${{ steps.bazel_cache_release.outputs.proxy-port || steps.bazel_cache_custom.outputs.proxy-port }}" \
             --proxy-log-path "${{ steps.bazel_cache_release.outputs.proxy-log-path || steps.bazel_cache_custom.outputs.proxy-log-path }}" \
-            --cache-root "$HOME/.cache/bazel" \
+            --cache-root "$BAZEL_OUTPUT_USER_ROOT" \
             --cache-label "bazel-cache"
 
       - name: Summarize Bazel miss profile
@@ -659,7 +660,7 @@ jobs:
             --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Warm/stale phases start by running bazel clean --expunge, then boringcache/one in mode=bazel restores saved local Bazel state and starts cache-registry proxy before the build begins. Warm runs reuse restored local Bazel state plus proxy-backed remote action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Both strategies use a dedicated BAZEL_OUTPUT_USER_ROOT under the runner temp directory so local Bazel state is isolated and fully restorable. Warm/stale phases delete that dedicated local state root, then boringcache/one in mode=bazel restores saved local Bazel state and starts cache-registry proxy before the build begins. Warm runs reuse restored local Bazel state plus proxy-backed remote action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
 
       - name: Write phase timing breakdown
         id: phase_breakdown
