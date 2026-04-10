@@ -121,7 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
+      BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
     outputs:
       tags_csv: ${{ steps.scope.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -276,7 +276,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
+      BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -663,7 +663,7 @@ jobs:
             --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Both strategies use a dedicated BAZEL_OUTPUT_USER_ROOT under the runner temp directory so local Bazel state is isolated and fully restorable. Warm/stale phases delete that dedicated local state root, then boringcache/one in mode=bazel restores saved local Bazel state and starts cache-registry proxy before the build begins. Warm runs reuse restored local Bazel state plus proxy-backed remote action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Both strategies use a dedicated BAZEL_OUTPUT_USER_ROOT under /tmp so local Bazel state is isolated and fully restorable. Warm/stale phases delete that dedicated local state root, then boringcache/one in mode=bazel restores saved local Bazel state and starts cache-registry proxy before the build begins. Warm runs reuse restored local Bazel state plus proxy-backed remote action cache + CAS. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
 
       - name: Write phase timing breakdown
         id: phase_breakdown

@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
+      BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       seed_cache_key: ${{ steps.seed_cache_key.outputs.key }}
@@ -213,7 +213,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
+      BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
@@ -512,7 +512,7 @@ jobs:
             --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
-            --hit-behavior-note "Cold+seed run builds from scratch and saves the dedicated BAZEL_OUTPUT_USER_ROOT path to actions/cache (primary key with fallback key retry) while recording cold timing. Both strategies use a dedicated BAZEL_OUTPUT_USER_ROOT under the runner temp directory so local Bazel state is isolated and fully restorable. Workflow waits for cache index visibility before warm phases. Warm/stale phases delete that dedicated local state root, restore the seeded cache, then build. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
+            --hit-behavior-note "Cold+seed run builds from scratch and saves the dedicated BAZEL_OUTPUT_USER_ROOT path to actions/cache (primary key with fallback key retry) while recording cold timing. Both strategies use a dedicated BAZEL_OUTPUT_USER_ROOT under /tmp so local Bazel state is isolated and fully restorable. Workflow waits for cache index visibility before warm phases. Warm/stale phases delete that dedicated local state root, restore the seeded cache, then build. Stale-low mutates example C++ code. Stale-mid mutates src/ implementation code. Stale-high mutates public include/grpc[pp] headers. Warm1/Warm2/stale-low/stale-mid/stale-high phases run as isolated matrix jobs on separate runners to avoid cross-phase local cache/state reuse."
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
