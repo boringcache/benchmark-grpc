@@ -24,7 +24,6 @@ env:
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
-  BAZEL_OUTPUT_USER_ROOT: "${{ runner.temp }}/boringcache-bazel-root"
 
 jobs:
   seed-cache:
@@ -32,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
+      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       seed_cache_key: ${{ steps.seed_cache_key.outputs.key }}
@@ -213,6 +213,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
+      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false

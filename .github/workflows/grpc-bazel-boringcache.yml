@@ -31,7 +31,6 @@ env:
   CLI_RELEASE_TAG: "v1.12.26"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
-  BAZEL_OUTPUT_USER_ROOT: "${{ runner.temp }}/boringcache-bazel-root"
   # Run-scoped tag ensures cold build starts with empty remote cache.
   # boringcache delete can't purge cache-registry proxy data, so we
   # use a unique tag per run instead.
@@ -121,6 +120,8 @@ jobs:
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
     outputs:
       tags_csv: ${{ steps.scope.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -274,6 +275,8 @@ jobs:
     needs: [prepare-cli, seed-cache]
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      BAZEL_OUTPUT_USER_ROOT: ${{ runner.temp }}/boringcache-bazel-root
     strategy:
       fail-fast: false
       max-parallel: 1
