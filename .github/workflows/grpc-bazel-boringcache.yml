@@ -35,6 +35,8 @@ env:
   # boringcache delete can't purge cache-registry proxy data, so we
   # use a unique tag per run instead.
   BAZEL_REMOTE_CACHE_TAG: grpc-bazel-remote-cache-r${{ github.run_id }}-a${{ github.run_attempt }}
+  BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: 999999
+  BORINGCACHE_STARTUP_PREFETCH_MAX_TOTAL_BYTES: 10737418240
 
 jobs:
   prepare-cli:
