@@ -28,7 +28,7 @@ env:
   PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
-  CLI_RELEASE_TAG: "v1.12.26"
+  CLI_RELEASE_TAG: "v1.12.27"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
   # Run-scoped tag ensures cold build starts with empty remote cache.
