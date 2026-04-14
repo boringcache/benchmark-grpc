@@ -77,10 +77,11 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
 
+          bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel build "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" build "$BAZEL_TARGET"); then
               break
             fi
 
@@ -260,10 +261,11 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
 
+          bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel build "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" build "$BAZEL_TARGET"); then
               break
             fi
 
