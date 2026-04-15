@@ -1,10 +1,18 @@
 name: "gRPC Bazel - BoringCache"
 run-name: >-
-  BC | ${{ github.event_name == 'push' && github.event.head_commit.message || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name) }}
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'BC Rolling' || 'BC Fresh', github.event_name == 'push' && github.event.head_commit.message || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
     inputs:
+      cache_lane:
+        description: "Benchmark lane"
+        required: false
+        type: choice
+        default: fresh
+        options:
+          - fresh
+          - rolling
       cli_ref:
         description: "Optional boringcache/cli ref to build and use instead of the released CLI"
         required: false
@@ -35,10 +43,7 @@ env:
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
-  # Run-scoped tag ensures cold build starts with empty remote cache.
-  # boringcache delete can't purge cache-registry proxy data, so we
-  # use a unique tag per run instead.
-  BAZEL_REMOTE_CACHE_TAG: grpc-bazel-remote-cache-r${{ github.run_id }}-a${{ github.run_attempt }}
+  BAZEL_REMOTE_CACHE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-remote-cache-rolling-{0}', github.ref_name) || format('grpc-bazel-remote-cache-r{0}-a{1}', github.run_id, github.run_attempt) }}
   BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: 999999
   BORINGCACHE_STARTUP_PREFETCH_MAX_TOTAL_BYTES: 10737418240
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: 64
@@ -678,13 +683,14 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "boringcache" \
+            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "Cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Warm1 runs on a fresh runner, rebuilds the same pinned source tree against the same run-scoped remote cache in read-only mode, and measures cache hits without synthetic mutations."
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: the first build restores the stable Bazel remote cache carried across upstream syncs before rebuilding the new pinned source tree. Warm1 then reuses the cache state written by that first build on the current commit.' || 'Fresh lane: cold+seed run builds from empty state with remote cache enabled and records cold timing while priming the proxy-backed cache. Warm1 runs on a fresh runner, rebuilds the same pinned source tree against the same run-scoped remote cache in read-only mode, and measures cache hits without synthetic mutations.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown
@@ -698,7 +704,7 @@ jobs:
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache
+          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}
