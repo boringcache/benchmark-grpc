@@ -28,7 +28,6 @@ env:
   PROJECT_REF: "93ab404fb2689edca91deb97f0dba449ac154379"
   BENCHMARK_ID: grpc-bazel
   BENCHMARK_WORKSPACE: boringcache/benchmarks
-  CLI_RELEASE_TAG: "v1.12.27"
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
   # Run-scoped tag ensures cold build starts with empty remote cache.
@@ -51,6 +50,7 @@ jobs:
       artifact_name: ${{ steps.resolve.outputs.artifact_name }}
       cli_source: ${{ steps.metadata.outputs.cli_source }}
       cli_ref: ${{ steps.metadata.outputs.cli_ref }}
+      cli_version: ${{ steps.metadata.outputs.cli_version }}
     steps:
       - name: Resolve CLI source
         id: resolve
@@ -65,6 +65,17 @@ jobs:
             echo "artifact_name=" >> "$GITHUB_OUTPUT"
           fi
           echo "requested_ref=${requested_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve released CLI tag
+        if: steps.resolve.outputs.use_custom_cli != 'true'
+        id: release_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_tag="$(gh api repos/boringcache/cli/releases/latest --jq .tag_name)"
+          [[ -n "$release_tag" ]] || { echo "Failed to resolve released CLI tag" >&2; exit 1; }
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout CLI repo
         if: steps.resolve.outputs.use_custom_cli == 'true'
@@ -115,9 +126,11 @@ jobs:
           if [[ "${{ steps.resolve.outputs.use_custom_cli }}" == "true" ]]; then
             echo "cli_source=custom" >> "$GITHUB_OUTPUT"
             echo "cli_ref=${{ steps.resolved_ref.outputs.cli_ref }}" >> "$GITHUB_OUTPUT"
+            echo "cli_version=" >> "$GITHUB_OUTPUT"
           else
             echo "cli_source=release" >> "$GITHUB_OUTPUT"
-            echo "cli_ref=" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "cli_version=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
           fi
 
   seed-cache:
@@ -202,7 +215,7 @@ jobs:
         id: bazel_cache_release
         uses: boringcache/one@v1
         with:
-          cli-version: ${{ env.CLI_RELEASE_TAG }}
+          cli-version: ${{ needs.prepare-cli.outputs.cli_version }}
           setup: mise
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
@@ -367,7 +380,7 @@ jobs:
         id: bazel_cache_release
         uses: boringcache/one@v1
         with:
-          cli-version: ${{ env.CLI_RELEASE_TAG }}
+          cli-version: ${{ needs.prepare-cli.outputs.cli_version }}
           setup: mise
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
@@ -593,7 +606,7 @@ jobs:
         run: |
           set -euo pipefail
           bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ env.CLI_RELEASE_TAG }}"
+            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
