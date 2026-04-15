@@ -144,14 +144,14 @@ jobs:
           fi
 
   seed-cache:
-    name: Bazel Seed (BoringCache, cold)
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Seed (BoringCache, rolling)' || 'Bazel Seed (BoringCache, fresh)' }}
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
     outputs:
-      tags_csv: ${{ steps.scope.outputs.tags_csv }}
+      tags_csv: ${{ steps.resolved_seed_tag.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
     steps:
       - name: Checkout benchmark repo
@@ -256,7 +256,18 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
 
-      - name: Run cold + seed cache build
+      - name: Capture resolved BoringCache tag
+        id: resolved_seed_tag
+        run: |
+          set -euo pipefail
+          cache_tag="${{ steps.bazel_cache_release.outputs.cache-tag }}"
+          if [[ -z "$cache_tag" ]]; then
+            cache_tag="${{ steps.bazel_cache_custom.outputs.cache-tag }}"
+          fi
+          echo "cache_tag=${cache_tag}" >> "$GITHUB_OUTPUT"
+          echo "tags_csv=${cache_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed build' || 'Run fresh seed build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -280,9 +291,9 @@ jobs:
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-seed" \
             --workspace "$BENCHMARK_WORKSPACE" \
-            --tags "$BAZEL_REMOTE_CACHE_TAG" \
+            --tags "${{ steps.resolved_seed_tag.outputs.tags_csv }}" \
             --phase "seed" \
-            --cache-tag "$BAZEL_REMOTE_CACHE_TAG" \
+            --cache-tag "${{ steps.resolved_seed_tag.outputs.cache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
             --proxy-port "${{ steps.bazel_cache_release.outputs.proxy-port || steps.bazel_cache_custom.outputs.proxy-port }}" \
@@ -423,6 +434,17 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
 
+      - name: Capture resolved BoringCache tag
+        id: resolved_scenario_tag
+        run: |
+          set -euo pipefail
+          cache_tag="${{ steps.bazel_cache_release.outputs.cache-tag }}"
+          if [[ -z "$cache_tag" ]]; then
+            cache_tag="${{ steps.bazel_cache_custom.outputs.cache-tag }}"
+          fi
+          echo "cache_tag=${cache_tag}" >> "$GITHUB_OUTPUT"
+          echo "tags_csv=${cache_tag}" >> "$GITHUB_OUTPUT"
+
       - name: Capture proxy ready timing
         id: proxy_ready_timing
         run: |
@@ -505,9 +527,9 @@ jobs:
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-${{ matrix.phase }}" \
             --workspace "$BENCHMARK_WORKSPACE" \
-            --tags "$BAZEL_REMOTE_CACHE_TAG" \
+            --tags "${{ steps.resolved_scenario_tag.outputs.tags_csv }}" \
             --phase "${{ matrix.phase }}" \
-            --cache-tag "$BAZEL_REMOTE_CACHE_TAG" \
+            --cache-tag "${{ steps.resolved_scenario_tag.outputs.cache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
             --proxy-port "${{ steps.bazel_cache_release.outputs.proxy-port || steps.bazel_cache_custom.outputs.proxy-port }}" \
