@@ -14,7 +14,7 @@ stderr_file="$(mktemp)"
 trap 'rm -f "$tmp_file" "$stderr_file"' EXIT
 
 # Check all tags in one request so tag resolution/miss accounting is consistent.
-if ! boringcache check "$workspace" "$tags_csv" --no-git --json > "$tmp_file" 2> "$stderr_file"; then
+if ! boringcache check "$workspace" "$tags_csv" --no-git --no-platform --exact --json > "$tmp_file" 2> "$stderr_file"; then
   echo "boringcache check failed while measuring remote storage for tags: ${tags_csv}" >&2
   cat "$stderr_file" >&2
   exit 1

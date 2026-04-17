@@ -43,6 +43,7 @@ env:
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
+  BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
   BAZEL_REMOTE_CACHE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-remote-cache-rolling-{0}', github.ref_name) || format('grpc-bazel-remote-cache-r{0}-a{1}', github.run_id, github.run_attempt) }}
   BAZEL_OUTPUT_ROOT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-output-root-rolling-{0}', github.ref_name) || format('grpc-bazel-output-root-r{0}-a{1}', github.run_id, github.run_attempt) }}
   BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: 999999
@@ -202,10 +203,11 @@ jobs:
           set -euo pipefail
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
+          bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" build "$@" "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$@" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -231,7 +233,12 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: ${{ env.BAZEL_OUTPUT_USER_ROOT }}
+          path: |
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/external
+            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -253,7 +260,12 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: ${{ env.BAZEL_OUTPUT_USER_ROOT }}
+          path: |
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/external
+            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -311,7 +323,7 @@ jobs:
 
       - name: Flush Bazel server state
         if: always()
-        run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" shutdown) || true
+        run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown) || true
 
       - name: Collect BoringCache diagnostics
         if: always()
@@ -402,10 +414,11 @@ jobs:
           set -euo pipefail
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
+          bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" build "$@" "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$@" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -438,7 +451,12 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: ${{ env.BAZEL_OUTPUT_USER_ROOT }}
+          path: |
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/external
+            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -461,7 +479,12 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: ${{ env.BAZEL_OUTPUT_USER_ROOT }}
+          path: |
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
+            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/external
+            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -581,7 +604,7 @@ jobs:
 
       - name: Flush Bazel server state
         if: always()
-        run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" shutdown) || true
+        run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown) || true
 
       - name: Upload Bazel profile
         if: matrix.phase == 'warm1' && (always())
