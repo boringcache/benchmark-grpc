@@ -10,17 +10,35 @@ if [[ -z "$workspace" || -z "$tags_csv" ]]; then
 fi
 
 tmp_file="$(mktemp)"
-trap 'rm -f "$tmp_file"' EXIT
+stderr_file="$(mktemp)"
+trap 'rm -f "$tmp_file" "$stderr_file"' EXIT
 
 # Check all tags in one request so tag resolution/miss accounting is consistent.
-if ! boringcache check "$workspace" "$tags_csv" --no-git --json > "$tmp_file" 2>/dev/null; then
-  echo "0"
-  exit 0
+if ! boringcache check "$workspace" "$tags_csv" --no-git --json > "$tmp_file" 2> "$stderr_file"; then
+  echo "boringcache check failed while measuring remote storage for tags: ${tags_csv}" >&2
+  cat "$stderr_file" >&2
+  exit 1
 fi
 
 if ! jq -e '.results | type == "array"' "$tmp_file" >/dev/null 2>&1; then
-  echo "0"
-  exit 0
+  echo "boringcache check returned unexpected JSON while measuring remote storage" >&2
+  cat "$tmp_file" >&2
+  exit 1
+fi
+
+miss_count="$(
+  jq -r '
+    [
+      .results[]?
+      | select((.status // "") != "hit")
+    ] | length
+  ' "$tmp_file"
+)"
+
+if [[ "$miss_count" != "0" ]]; then
+  echo "boringcache check did not find every expected storage tag: ${tags_csv}" >&2
+  jq -r '.results[]? | "\(.tag // .entry // "unknown"): \(.status // "unknown")"' "$tmp_file" >&2
+  exit 1
 fi
 
 total="$(
