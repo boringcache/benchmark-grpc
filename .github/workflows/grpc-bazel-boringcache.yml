@@ -691,8 +691,8 @@ jobs:
           fi
           restore_seconds=0
           proxy_ready_seconds="${{ steps.proxy_ready_timing.outputs.seconds }}"
-          seconds="${build_seconds}"
           end_to_end_seconds=$((restore_seconds + proxy_ready_seconds + build_seconds))
+          seconds="${end_to_end_seconds}"
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
           echo "restore_seconds=${restore_seconds}" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=${proxy_ready_seconds}" >> "$GITHUB_OUTPUT"
