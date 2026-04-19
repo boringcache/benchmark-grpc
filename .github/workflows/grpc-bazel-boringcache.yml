@@ -45,7 +45,7 @@ env:
   CLI_RUST_VERSION: "1.89"
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
   BAZEL_REMOTE_CACHE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-remote-cache-rolling-{0}', github.ref_name) || format('grpc-bazel-remote-cache-r{0}-a{1}', github.run_id, github.run_attempt) }}
-  BAZEL_OUTPUT_ROOT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-output-root-rolling-{0}', github.ref_name) || format('grpc-bazel-output-root-r{0}-a{1}', github.run_id, github.run_attempt) }}
+  BAZEL_OUTPUT_ROOT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-output-root-safe-v2-rolling-{0}', github.ref_name) || format('grpc-bazel-output-root-safe-v2-r{0}-a{1}', github.run_id, github.run_attempt) }}
   BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: 999999
   BORINGCACHE_STARTUP_PREFETCH_MAX_TOTAL_BYTES: 10737418240
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: 64
@@ -240,9 +240,7 @@ jobs:
           path: |
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/external
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -267,9 +265,7 @@ jobs:
           path: |
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/external
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -460,9 +456,7 @@ jobs:
           path: |
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/external
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -488,9 +482,7 @@ jobs:
           path: |
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/external
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/execroot
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
