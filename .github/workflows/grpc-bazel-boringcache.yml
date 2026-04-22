@@ -327,6 +327,9 @@ jobs:
         if: always()
         run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown) || true
 
+      - name: Normalize Bazel output root symlinks before archive save
+        run: python3 ./scripts/normalize-bazel-output-root-symlinks.py "$BAZEL_OUTPUT_USER_ROOT"
+
       - name: Collect BoringCache diagnostics
         if: always()
         env:
@@ -356,18 +359,13 @@ jobs:
 
 
   scenario-builds:
-    name: Bazel Scenario (${{ matrix.phase }}) (BoringCache)
+    name: Bazel Warm rerun (BoringCache)
     needs: [prepare-cli, seed-cache]
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        phase: [warm1]
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -382,7 +380,7 @@ jobs:
           git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
 
       - name: Prepare scenario source tree
-        run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
+        run: ./scripts/prepare-source.sh warm1
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
@@ -549,7 +547,6 @@ jobs:
 
       - name: Run warm build 1
         id: warm1_build
-        if: matrix.phase == 'warm1'
         run: |
           set -euo pipefail
           start="$(date +%s)"
@@ -557,55 +554,13 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Run warm build 2
-        id: warm2_build
-        if: matrix.phase == 'warm2'
-        run: |
-          set -euo pipefail
-          start="$(date +%s)"
-          ./run-grpc-bazel-build.sh
-          end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
-
-      - name: Run stale-low build
-        id: stale_low_build
-        if: matrix.phase == 'stale-low'
-        run: |
-          set -euo pipefail
-
-          start="$(date +%s)"
-          ./run-grpc-bazel-build.sh
-          end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
-
-      - name: Run stale-mid build
-        id: stale_mid_build
-        if: matrix.phase == 'stale-mid'
-        run: |
-          set -euo pipefail
-
-          start="$(date +%s)"
-          ./run-grpc-bazel-build.sh
-          end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
-
-      - name: Run stale-high build
-        id: stale_high_build
-        if: matrix.phase == 'stale-high'
-        run: |
-          set -euo pipefail
-
-          start="$(date +%s)"
-          ./run-grpc-bazel-build.sh
-          end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Flush Bazel server state
         if: always()
         run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown) || true
 
       - name: Upload Bazel profile
-        if: matrix.phase == 'warm1' && (always())
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: bazel-warm1-profile
@@ -619,10 +574,10 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
-            --output-dir "boringcache-diag-${{ matrix.phase }}" \
+            --output-dir "boringcache-diag-warm1" \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "${{ steps.resolved_scenario_tag.outputs.tags_csv }}" \
-            --phase "${{ matrix.phase }}" \
+            --phase "warm1" \
             --cache-tag "${{ steps.resolved_scenario_tag.outputs.cache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
@@ -632,10 +587,10 @@ jobs:
             --cache-label "bazel-cache"
 
       - name: Summarize Bazel miss profile
-        if: matrix.phase == 'warm1' && (always())
+        if: always()
         run: |
           set -euo pipefail
-          out_dir="boringcache-diag-${{ matrix.phase }}"
+          out_dir="boringcache-diag-warm1"
           mkdir -p "$out_dir"
           if [[ -f /tmp/bazel-warm1-build.log ]]; then
             cp /tmp/bazel-warm1-build.log "${out_dir}/bazel-warm1-build.log"
@@ -646,15 +601,15 @@ jobs:
               --profile /tmp/bazel-warm1-profile.gz \
               --build-log /tmp/bazel-warm1-build.log \
               --output-dir "$out_dir" \
-              --phase "${{ matrix.phase }}"
+              --phase "warm1"
           fi
 
       - name: Upload BoringCache diagnostics
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ matrix.phase }}-boringcache
-          path: boringcache-diag-${{ matrix.phase }}
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm1-boringcache
+          path: boringcache-diag-warm1
           if-no-files-found: warn
 
       - name: Capture scenario timing
@@ -662,29 +617,9 @@ jobs:
         run: |
           set -euo pipefail
           build_seconds=""
-          case "${{ matrix.phase }}" in
-            warm1)
-              build_seconds="${{ steps.warm1_build.outputs.seconds }}"
-              ;;
-            warm2)
-              build_seconds="${{ steps.warm2_build.outputs.seconds }}"
-              ;;
-            stale-low)
-              build_seconds="${{ steps.stale_low_build.outputs.seconds }}"
-              ;;
-            stale-mid)
-              build_seconds="${{ steps.stale_mid_build.outputs.seconds }}"
-              ;;
-            stale-high)
-              build_seconds="${{ steps.stale_high_build.outputs.seconds }}"
-              ;;
-            *)
-              echo "Unknown phase: ${{ matrix.phase }}" >&2
-              exit 1
-              ;;
-          esac
+          build_seconds="${{ steps.warm1_build.outputs.seconds }}"
           if [[ -z "${build_seconds}" ]]; then
-            echo "No timing captured for phase ${{ matrix.phase }}" >&2
+            echo "No timing captured for warm1" >&2
             exit 1
           fi
           restore_seconds=0
@@ -700,8 +635,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p benchmark-phase
-          cat > "benchmark-phase/${{ matrix.phase }}.env" <<EOF
-          phase=${{ matrix.phase }}
+          cat > "benchmark-phase/warm1.env" <<EOF
+          phase=warm1
           seconds=${{ steps.phase_timing.outputs.seconds }}
           restore_seconds=${{ steps.phase_timing.outputs.restore_seconds }}
           proxy_ready_seconds=${{ steps.phase_timing.outputs.proxy_ready_seconds }}
@@ -711,8 +646,8 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-${{ matrix.phase }}
-          path: benchmark-phase/${{ matrix.phase }}.env
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm1
+          path: benchmark-phase/warm1.env
           if-no-files-found: error
 
   finalize-benchmark:
@@ -809,7 +744,7 @@ jobs:
             --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 and layer-miss follow-up runs are intentionally skipped. The seed may restore the previous BoringCache output-root archive and updates the rolling proxy-backed remote cache plus output-root archive.' || 'Fresh lane: cold+seed run builds from empty state with remote cache enabled and records cold timing while priming both the proxy-backed remote cache and a run-scoped BoringCache archive of the Bazel output root. Warm1 runs on a fresh runner, restores that output-root archive, configures the same run-scoped remote cache in read-only mode as fallback, and measures cache hits without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped. The seed may restore the previous BoringCache output-root archive and updates the rolling proxy-backed remote cache plus output-root archive.' || 'Fresh lane: cold+seed run builds from empty state with remote cache enabled and records cold timing while priming both the proxy-backed remote cache and a run-scoped BoringCache archive of the Bazel output root. Warm1 runs on a fresh runner, restores that output-root archive, configures the same run-scoped remote cache in read-only mode as fallback, and measures cache hits without synthetic mutations.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown
