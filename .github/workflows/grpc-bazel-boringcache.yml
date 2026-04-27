@@ -156,7 +156,7 @@ jobs:
     timeout-minutes: 300
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=${{ env.BENCHMARK_ID }},phase=seed
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=seed
     outputs:
       tags_csv: ${{ steps.resolved_seed_tag.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -375,7 +375,7 @@ jobs:
     timeout-minutes: 300
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=${{ env.BENCHMARK_ID }},phase=warm
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=warm
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
