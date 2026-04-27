@@ -50,11 +50,6 @@ env:
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
   BAZEL_REMOTE_CACHE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-remote-cache-rolling-{0}', github.ref_name) || format('grpc-bazel-remote-cache-r{0}-a{1}', github.run_id, github.run_attempt) }}
   BAZEL_OUTPUT_ROOT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-output-root-safe-v2-rolling-{0}', github.ref_name) || format('grpc-bazel-output-root-safe-v2-r{0}-a{1}', github.run_id, github.run_attempt) }}
-  BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: 999999
-  BORINGCACHE_STARTUP_PREFETCH_MAX_TOTAL_BYTES: 10737418240
-  BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: 64
-  BORINGCACHE_CACHE_PREFETCH_CONCURRENCY: 64
-  BORINGCACHE_BLOB_PREFETCH_MAX_INFLIGHT_BYTES: 10737418240
   
 jobs:
   prepare-cli:
