@@ -63,8 +63,6 @@ env:
   BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
   BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
-  BAZEL_REMOTE_CACHE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-remote-cache-rolling-{0}', github.ref_name) || format('grpc-bazel-remote-cache-r{0}-a{1}', github.run_id, github.run_attempt) }}
-  BAZEL_OUTPUT_ROOT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-output-root-safe-v2-rolling-{0}', github.ref_name) || format('grpc-bazel-output-root-safe-v2-r{0}-a{1}', github.run_id, github.run_attempt) }}
   
 jobs:
   prepare-cli:
@@ -77,7 +75,30 @@ jobs:
       cli_source: ${{ steps.metadata.outputs.cli_source }}
       cli_ref: ${{ steps.metadata.outputs.cli_ref }}
       cli_version: ${{ steps.metadata.outputs.cli_version }}
+      bazel_remote_cache_tag: ${{ steps.cache_tags.outputs.bazel_remote_cache_tag }}
+      bazel_output_root_tag: ${{ steps.cache_tags.outputs.bazel_output_root_tag }}
     steps:
+      - name: Resolve benchmark cache tags
+        id: cache_tags
+        run: |
+          set -euo pipefail
+          lane="${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}"
+          if [[ "$lane" == "rolling" ]]; then
+            # Keep branch-dispatch rolling tags server-valid; github.ref_name can contain '/'.
+            ref_slug="$(printf '%s' "${GITHUB_REF_NAME:-main}" | tr -c 'A-Za-z0-9._-' '-')"
+            ref_slug="${ref_slug#-}"
+            ref_slug="${ref_slug%-}"
+            ref_slug="${ref_slug:-main}"
+            bazel_remote_cache_tag="grpc-bazel-remote-cache-rolling-${ref_slug}"
+            bazel_output_root_tag="grpc-bazel-output-root-safe-v2-rolling-${ref_slug}"
+          else
+            bazel_remote_cache_tag="grpc-bazel-remote-cache-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            bazel_output_root_tag="grpc-bazel-output-root-safe-v2-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          fi
+
+          echo "bazel_remote_cache_tag=${bazel_remote_cache_tag}" >> "$GITHUB_OUTPUT"
+          echo "bazel_output_root_tag=${bazel_output_root_tag}" >> "$GITHUB_OUTPUT"
+
       - name: Resolve CLI source
         id: resolve
         run: |
@@ -177,6 +198,8 @@ jobs:
     timeout-minutes: 300
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
+      BAZEL_REMOTE_CACHE_TAG: ${{ needs.prepare-cli.outputs.bazel_remote_cache_tag }}
+      BAZEL_OUTPUT_ROOT_TAG: ${{ needs.prepare-cli.outputs.bazel_output_root_tag }}
       BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=seed
     outputs:
       tags_csv: ${{ steps.resolved_seed_tag.outputs.tags_csv }}
@@ -396,6 +419,8 @@ jobs:
     timeout-minutes: 300
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
+      BAZEL_REMOTE_CACHE_TAG: ${{ needs.prepare-cli.outputs.bazel_remote_cache_tag }}
+      BAZEL_OUTPUT_ROOT_TAG: ${{ needs.prepare-cli.outputs.bazel_output_root_tag }}
       BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=warm
     steps:
       - name: Checkout benchmark repo
