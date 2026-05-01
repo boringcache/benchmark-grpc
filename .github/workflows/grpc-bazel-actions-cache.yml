@@ -43,6 +43,7 @@ env:
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
+  BAZEL_DISK_CACHE: /tmp/boringcache-bazel-root/disk-cache
 
 jobs:
   seed-cache:
@@ -116,10 +117,12 @@ jobs:
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
+          bazel_disk_cache="${BAZEL_DISK_CACHE:?BAZEL_DISK_CACHE must be set}"
+          mkdir -p "$bazel_disk_cache"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build --disk_cache="$bazel_disk_cache" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -190,6 +193,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ steps.scope.outputs.cache_key_primary }}
           restore-keys: |
             ${{ steps.scope.outputs.cache_key_prefix }}-
@@ -218,6 +222,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ steps.scope.outputs.cache_key_primary }}
 
       - name: Save seeded Bazel cache (fallback key)
@@ -230,6 +235,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ steps.scope.outputs.cache_key_fallback }}
 
       - name: Resolve seeded cache key
@@ -318,10 +324,12 @@ jobs:
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
+          bazel_disk_cache="${BAZEL_DISK_CACHE:?BAZEL_DISK_CACHE must be set}"
+          mkdir -p "$bazel_disk_cache"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build --disk_cache="$bazel_disk_cache" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -351,6 +359,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
