@@ -17,6 +17,18 @@ on:
         description: "Internal benchmark diagnostic only: build this boringcache/cli ref instead of using the released CLI"
         required: false
         type: string
+      blob_download_concurrency:
+        description: "Optional BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY override (blank = adaptive)"
+        required: false
+        type: string
+      blob_prefetch_concurrency:
+        description: "Optional BORINGCACHE_BLOB_PREFETCH_CONCURRENCY override (blank = match download concurrency)"
+        required: false
+        type: string
+      oci_stream_through_min_bytes:
+        description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES (Docker/OCI only; blank = disabled)"
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -47,6 +59,9 @@ env:
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
+  BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}
+  BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
+  BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
   BAZEL_REMOTE_CACHE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-remote-cache-rolling-{0}', github.ref_name) || format('grpc-bazel-remote-cache-r{0}-a{1}', github.run_id, github.run_attempt) }}
   BAZEL_OUTPUT_ROOT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('grpc-bazel-output-root-safe-v2-rolling-{0}', github.ref_name) || format('grpc-bazel-output-root-safe-v2-r{0}-a{1}', github.run_id, github.run_attempt) }}
