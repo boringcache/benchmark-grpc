@@ -374,7 +374,7 @@ jobs:
 
       - name: Flush Bazel server state
         if: always()
-        run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown) || true
+        run: timeout 30s bash -lc 'cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown' || true
 
       - name: Normalize Bazel output root symlinks before archive save
         run: |
@@ -613,7 +613,7 @@ jobs:
 
       - name: Flush Bazel server state
         if: always()
-        run: (cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown) || true
+        run: timeout 30s bash -lc 'cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown' || true
 
       - name: Upload Bazel profile
         if: always()
