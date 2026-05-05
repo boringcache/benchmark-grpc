@@ -79,12 +79,8 @@ jobs:
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Bazel with mise
-        uses: boringcache/one@v1
-        with:
-          setup: mise
-          mode: archive
-          cache-runtime: false
+      - name: Setup Bazelisk for actions/cache tooling
+        uses: bazelbuild/setup-bazelisk@v3
 
       - name: Prepare benchmark scope
         id: scope
@@ -299,12 +295,8 @@ jobs:
       - name: Prepare scenario source tree
         run: ./scripts/prepare-source.sh warm1
 
-      - name: Setup Bazel with mise
-        uses: boringcache/one@v1
-        with:
-          setup: mise
-          mode: archive
-          cache-runtime: false
+      - name: Setup Bazelisk for actions/cache tooling
+        uses: bazelbuild/setup-bazelisk@v3
 
       - name: Prepare benchmark scope
         id: scope
