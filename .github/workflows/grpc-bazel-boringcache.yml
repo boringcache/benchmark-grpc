@@ -63,6 +63,7 @@ env:
   BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
   BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
+  BAZEL_DISK_CACHE: /tmp/boringcache-bazel-root/disk-cache
   
 jobs:
   prepare-cli:
@@ -204,6 +205,7 @@ jobs:
     outputs:
       tags_csv: ${{ steps.resolved_seed_tag.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
+      cold_build_seconds: ${{ steps.cold_baseline_build.outputs.build_seconds }}
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -257,10 +259,12 @@ jobs:
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
+          bazel_disk_cache="${BAZEL_DISK_CACHE:?BAZEL_DISK_CACHE must be set}"
+          mkdir -p "$bazel_disk_cache"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$@" "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build --disk_cache="$bazel_disk_cache" "$@" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -290,6 +294,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -315,6 +320,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -471,10 +477,12 @@ jobs:
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
+          bazel_disk_cache="${BAZEL_DISK_CACHE:?BAZEL_DISK_CACHE must be set}"
+          mkdir -p "$bazel_disk_cache"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$@" "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build --disk_cache="$bazel_disk_cache" "$@" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -511,6 +519,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -537,6 +546,7 @@ jobs:
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
             ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
             ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
+            ${{ env.BAZEL_DISK_CACHE }}
           key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
@@ -772,6 +782,11 @@ jobs:
               exit 1
             fi
             echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+            local build_seconds
+            build_seconds="$(grep "^build_seconds=" "$file" | head -n1 | cut -d= -f2- || true)"
+            if [[ -n "${build_seconds}" ]]; then
+              echo "${key}_build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
+            fi
           }
           parse_phase warm1
       - name: Measure BoringCache storage usage
@@ -809,7 +824,9 @@ jobs:
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
+            --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
             --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
