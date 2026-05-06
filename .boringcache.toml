@@ -1,16 +1,7 @@
 workspace = "boringcache/benchmarks"
 
-# This benchmark is already hybrid per the 2026-04-09 gRPC fix in
-# benchmarks/data/performance-learning-log.md: a Bazel HTTP-cache proxy
-# (mode=bazel) plus a BoringCache archive of $BAZEL_OUTPUT_USER_ROOT.
-#
-# The archive uses the actions/cache-compatible path:/key: shape on
-# boringcache/one because the archive tag (grpc-bazel-output-root-safe-v2-...)
-# carries an independent version namespace from the proxy tag
-# (grpc-bazel-remote-cache-...). Migrating to cache-profiles: here would
-# rename the archive tag and break the safe-v2 versioning that survived
-# the gRPC publish-correctness incident; that migration is out of scope
-# for this drift-cleanup pass.
-#
-# This file is the canonical config anchor; entries can be declared
-# here when a coordinated archive-tag rename is approved.
+# Bazel remote-cache benchmark. The measured BoringCache surface is
+# boringcache/one mode=bazel configuring Bazel's --remote_cache through
+# the proxy. Do not archive Bazel's output root or local disk cache here;
+# those local caches can mask remote-cache misses and belong in a separate
+# archive-parity lane if we need that comparison later.

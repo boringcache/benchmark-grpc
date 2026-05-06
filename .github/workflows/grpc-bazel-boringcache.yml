@@ -63,7 +63,6 @@ env:
   BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
   BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
-  BAZEL_DISK_CACHE: /tmp/boringcache-bazel-root/disk-cache
   
 jobs:
   prepare-cli:
@@ -77,7 +76,6 @@ jobs:
       cli_ref: ${{ steps.metadata.outputs.cli_ref }}
       cli_version: ${{ steps.metadata.outputs.cli_version }}
       bazel_remote_cache_tag: ${{ steps.cache_tags.outputs.bazel_remote_cache_tag }}
-      bazel_output_root_tag: ${{ steps.cache_tags.outputs.bazel_output_root_tag }}
     steps:
       - name: Resolve benchmark cache tags
         id: cache_tags
@@ -91,14 +89,11 @@ jobs:
             ref_slug="${ref_slug%-}"
             ref_slug="${ref_slug:-main}"
             bazel_remote_cache_tag="grpc-bazel-remote-cache-rolling-${ref_slug}"
-            bazel_output_root_tag="grpc-bazel-output-root-safe-v2-rolling-${ref_slug}"
           else
             bazel_remote_cache_tag="grpc-bazel-remote-cache-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-            bazel_output_root_tag="grpc-bazel-output-root-safe-v2-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
 
           echo "bazel_remote_cache_tag=${bazel_remote_cache_tag}" >> "$GITHUB_OUTPUT"
-          echo "bazel_output_root_tag=${bazel_output_root_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve CLI source
         id: resolve
@@ -200,7 +195,6 @@ jobs:
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
       BAZEL_REMOTE_CACHE_TAG: ${{ needs.prepare-cli.outputs.bazel_remote_cache_tag }}
-      BAZEL_OUTPUT_ROOT_TAG: ${{ needs.prepare-cli.outputs.bazel_output_root_tag }}
       BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=seed
     outputs:
       tags_csv: ${{ steps.resolved_seed_tag.outputs.tags_csv }}
@@ -259,12 +253,10 @@ jobs:
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
-          bazel_disk_cache="${BAZEL_DISK_CACHE:?BAZEL_DISK_CACHE must be set}"
-          mkdir -p "$bazel_disk_cache"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build --disk_cache="$bazel_disk_cache" "$@" "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$@" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -290,12 +282,6 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: |
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_DISK_CACHE }}
-          key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
           force: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
@@ -316,12 +302,6 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: |
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_DISK_CACHE }}
-          key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
           force: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
@@ -342,25 +322,8 @@ jobs:
           fi
           [[ -n "$cache_tag" ]] || { echo "No resolved BoringCache remote cache tag" >&2; exit 1; }
 
-          archive_entries="${{ steps.bazel_cache_release.outputs.resolved-entries }}"
-          if [[ -z "$archive_entries" ]]; then
-            archive_entries="${{ steps.bazel_cache_custom.outputs.resolved-entries }}"
-          fi
-          archive_tags=""
-          if [[ -n "$archive_entries" ]]; then
-            IFS=',' read -ra entries <<< "$archive_entries"
-            for entry in "${entries[@]}"; do
-              tag="${entry%%:*}"
-              [[ -n "$tag" ]] || continue
-              archive_tags="${archive_tags:+${archive_tags},}${tag}"
-            done
-          fi
           tags_csv="$cache_tag"
-          if [[ -n "$archive_tags" ]]; then
-            tags_csv="${tags_csv},${archive_tags}"
-          fi
           echo "cache_tag=${cache_tag}" >> "$GITHUB_OUTPUT"
-          echo "archive_tags=${archive_tags}" >> "$GITHUB_OUTPUT"
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
 
       - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
@@ -381,13 +344,6 @@ jobs:
       - name: Flush Bazel server state
         if: always()
         run: timeout 30s bash -lc 'cd upstream && bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" --output_base="$BAZEL_OUTPUT_BASE" shutdown' || true
-
-      - name: Normalize Bazel output root symlinks before archive save
-        run: |
-          python3 ./scripts/normalize-bazel-output-root-symlinks.py \
-            "$BAZEL_OUTPUT_USER_ROOT/install" \
-            "$BAZEL_OUTPUT_USER_ROOT/cache" \
-            "$BAZEL_OUTPUT_BASE/action_cache"
 
       - name: Collect BoringCache diagnostics
         if: always()
@@ -426,7 +382,6 @@ jobs:
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
       BAZEL_REMOTE_CACHE_TAG: ${{ needs.prepare-cli.outputs.bazel_remote_cache_tag }}
-      BAZEL_OUTPUT_ROOT_TAG: ${{ needs.prepare-cli.outputs.bazel_output_root_tag }}
       BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=warm
     steps:
       - name: Checkout benchmark repo
@@ -477,12 +432,10 @@ jobs:
 
           bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
           bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
-          bazel_disk_cache="${BAZEL_DISK_CACHE:?BAZEL_DISK_CACHE must be set}"
-          mkdir -p "$bazel_disk_cache"
           max_attempts=3
           attempt=1
           while true; do
-            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build --disk_cache="$bazel_disk_cache" "$@" "$BAZEL_TARGET"); then
+            if (cd upstream && bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "$@" "$BAZEL_TARGET"); then
               break
             fi
 
@@ -515,15 +468,8 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: |
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_DISK_CACHE }}
-          key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
-          fail-on-cache-miss: true
           read-only: true
           save-policy: off
           proxy-no-git: true
@@ -542,15 +488,8 @@ jobs:
           mode: bazel
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          path: |
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/install
-            ${{ env.BAZEL_OUTPUT_USER_ROOT }}/cache
-            ${{ env.BAZEL_OUTPUT_BASE }}/action_cache
-            ${{ env.BAZEL_DISK_CACHE }}
-          key: ${{ env.BAZEL_OUTPUT_ROOT_TAG }}
           cache-runtime: false
           no-platform: true
-          fail-on-cache-miss: true
           read-only: true
           save-policy: off
           proxy-no-git: true
@@ -569,25 +508,8 @@ jobs:
           fi
           [[ -n "$cache_tag" ]] || { echo "No resolved BoringCache remote cache tag" >&2; exit 1; }
 
-          archive_entries="${{ steps.bazel_cache_release.outputs.resolved-entries }}"
-          if [[ -z "$archive_entries" ]]; then
-            archive_entries="${{ steps.bazel_cache_custom.outputs.resolved-entries }}"
-          fi
-          archive_tags=""
-          if [[ -n "$archive_entries" ]]; then
-            IFS=',' read -ra entries <<< "$archive_entries"
-            for entry in "${entries[@]}"; do
-              tag="${entry%%:*}"
-              [[ -n "$tag" ]] || continue
-              archive_tags="${archive_tags:+${archive_tags},}${tag}"
-            done
-          fi
           tags_csv="$cache_tag"
-          if [[ -n "$archive_tags" ]]; then
-            tags_csv="${tags_csv},${archive_tags}"
-          fi
           echo "cache_tag=${cache_tag}" >> "$GITHUB_OUTPUT"
-          echo "archive_tags=${archive_tags}" >> "$GITHUB_OUTPUT"
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
 
       - name: Capture proxy ready timing
@@ -598,16 +520,16 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Verify Bazel output root restored
+      - name: Verify BoringCache remote cache configured
         run: |
           set -euo pipefail
-          if [[ ! -d "$BAZEL_OUTPUT_USER_ROOT" ]]; then
-            echo "Bazel output root was not restored: ${BAZEL_OUTPUT_USER_ROOT}" >&2
+          cache_tag="${{ steps.resolved_scenario_tag.outputs.cache_tag }}"
+          if [[ -z "$cache_tag" ]]; then
+            echo "BoringCache Bazel remote cache tag was not resolved" >&2
             exit 1
           fi
-          first_entry="$(find "$BAZEL_OUTPUT_USER_ROOT" -mindepth 1 -maxdepth 3 -print -quit 2>/dev/null || true)"
-          if [[ -z "$first_entry" ]]; then
-            echo "Bazel output root restore produced no files: ${BAZEL_OUTPUT_USER_ROOT}" >&2
+          if [[ -z "${BAZEL_REMOTE_CACHE_TAG:-}" ]]; then
+            echo "BAZEL_REMOTE_CACHE_TAG is empty" >&2
             exit 1
           fi
 
@@ -830,7 +752,7 @@ jobs:
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped. The seed may restore the previous BoringCache output-root archive and updates the rolling proxy-backed remote cache plus output-root archive.' || 'Fresh lane: cold+seed run builds from empty state with remote cache enabled and records cold timing while priming both the proxy-backed remote cache and a run-scoped BoringCache archive of the Bazel output root. Warm1 runs on a fresh runner, restores that output-root archive, configures the same run-scoped remote cache in read-only mode as fallback, and measures cache hits without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: cold+seed run builds from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while priming only the proxy-backed remote cache. Warm1 runs on a fresh runner with an empty Bazel output root, configures the same run-scoped remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown
