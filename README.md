@@ -31,7 +31,9 @@ The story this benchmark is meant to show is:
 - speed on fresh cold and warm paths
 - first-build behavior after upstream sync in the rolling lane
 - storage footprint in each backend
-- cache reuse through native Bazel remote cache behavior
+- cache reuse through Bazel's documented cache surfaces: BoringCache uses
+  `--remote_cache`; actions/cache persists only the directory passed to
+  `--disk_cache`
 
 ## Token Model
 
