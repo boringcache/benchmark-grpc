@@ -1,4 +1,4 @@
-workspace = "boringcache/benchmarks"
+workspace = "boringcache/benchmark-grpc"
 
 # Bazel remote-cache benchmark. The measured BoringCache surface is
 # boringcache/one mode=bazel configuring Bazel's --remote_cache through

@@ -56,7 +56,7 @@ permissions:
 env:
   PROJECT_REPO: grpc/grpc
   BENCHMARK_ID: grpc-bazel
-  BENCHMARK_WORKSPACE: boringcache/benchmarks
+  BENCHMARK_WORKSPACE: ${{ github.repository }}
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   CLI_RUST_VERSION: "1.89"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}

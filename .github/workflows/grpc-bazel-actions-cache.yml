@@ -40,7 +40,7 @@ permissions:
 env:
   PROJECT_REPO: grpc/grpc
   BENCHMARK_ID: grpc-bazel
-  BENCHMARK_WORKSPACE: boringcache/benchmarks
+  BENCHMARK_WORKSPACE: ${{ github.repository }}
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
   BAZEL_DISK_CACHE: /tmp/boringcache-bazel-root/disk-cache
