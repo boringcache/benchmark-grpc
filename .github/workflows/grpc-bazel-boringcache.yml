@@ -188,7 +188,7 @@ jobs:
           fi
 
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Seed (BoringCache, rolling)' || 'Bazel Seed (BoringCache, fresh)' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Commit Build (BoringCache, rolling)' || 'Bazel Cold Build (BoringCache, fresh)' }}
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 300
@@ -326,7 +326,7 @@ jobs:
           echo "cache_tag=${cache_tag}" >> "$GITHUB_OUTPUT"
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -752,7 +752,7 @@ jobs:
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: cold+seed run builds from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while priming only the proxy-backed remote cache. Warm1 runs on a fresh runner with an empty Bazel output root, configures the same run-scoped remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: the cold build runs from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while populating only the proxy-backed remote cache. Warm1 runs on a fresh runner with an empty Bazel output root, configures the same run-scoped remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown

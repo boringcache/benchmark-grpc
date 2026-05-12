@@ -47,7 +47,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Seed (actions/cache, rolling)' || 'Bazel Seed (actions/cache, fresh)' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Commit Build (actions/cache, rolling)' || 'Bazel Cold Build (actions/cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -191,7 +191,7 @@ jobs:
           restore-keys: |
             ${{ steps.scope.outputs.cache_key_prefix }}-
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -462,7 +462,7 @@ jobs:
             --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped. actions/cache restores and saves Bazel disk cache only; Bazel output-root internals are not archived.' || 'Fresh lane: cold+seed run builds from scratch and saves only BAZEL_DISK_CACHE to actions/cache while recording cold timing. Warm1 restores that seeded Bazel disk cache on a fresh runner, rebuilds the same pinned source tree, and measures cache hits without synthetic mutations or Bazel output-root/action-cache archives.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped. actions/cache restores and saves Bazel disk cache only; Bazel output-root internals are not archived.' || 'Fresh lane: the cold build runs from scratch and saves only BAZEL_DISK_CACHE to actions/cache while recording cold timing. Warm1 restores that seeded Bazel disk cache on a fresh runner, rebuilds the same pinned source tree, and measures cache hits without synthetic mutations or Bazel output-root/action-cache archives.' }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
