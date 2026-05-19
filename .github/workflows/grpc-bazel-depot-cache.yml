@@ -182,6 +182,10 @@ jobs:
           total_deleted=0
 
           case "${mode}" in
+            ""|off|false)
+              echo "Depot Bazel cache inspection/purge disabled." >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+              ;;
             dry-run)
               ;;
             delete-prefix)
