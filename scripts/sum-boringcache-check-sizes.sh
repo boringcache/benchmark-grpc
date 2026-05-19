@@ -94,9 +94,6 @@ component_type_for() {
   local combined="${tag} ${primary_tag}"
 
   case "$storage_mode" in
-    kv)
-      echo "remote_cas"
-      ;;
     cas)
       echo "remote_cas"
       ;;
@@ -157,33 +154,6 @@ write_storage_breakdown() {
     tag="$(jq -r '.tag // .requested_tag // .requestedTag // empty' <<<"$row")"
     requested_tag="$(jq -r '.requested_tag // .requestedTag // .tag // empty' <<<"$row")"
     [[ -n "$tag" ]] || continue
-
-    if [[ "$(jq -r '.cache_type // .cacheType // empty' <<<"$row")" == "kv" ]]; then
-      stored_size="$(jq -r '.compressed_size // .compressedSize // .size_bytes // .sizeBytes // .size // 0' <<<"$row")"
-      stored_size="$(to_num "$stored_size")"
-      jq -c -n \
-        --arg tag "$tag" \
-        --arg requested_tag "$requested_tag" \
-        --arg entry_id "kv:${tag}" \
-        --arg storage_mode "kv" \
-        --arg component_type "remote_cas" \
-        --arg component_label "remote CAS" \
-        --argjson bytes "$stored_size" \
-        '{
-          tag: $tag,
-          requested_tag: $requested_tag,
-          cache_entry_id: $entry_id,
-          primary_tag: $tag,
-          storage_mode: $storage_mode,
-          component_type: $component_type,
-          component_label: $component_label,
-          bytes: $bytes,
-          archive_size_bytes: 0,
-          blob_total_size_bytes: $bytes
-        }' >> "$components_file"
-      continue
-    fi
-
     inspect_target="$(jq -r '.cache_entry_id // .cacheEntryId // empty' <<<"$row")"
     inspect_target="${inspect_target:-$tag}"
 
