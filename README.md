@@ -1,6 +1,6 @@
 # benchmark-grpc
 
-Public gRPC Bazel benchmark runner for BoringCache vs GitHub Actions cache.
+Public gRPC Bazel benchmark runner for BoringCache vs GitHub Actions cache, BuildBuddy Cache, and Depot Cache.
 
 This repo exists separately from [`boringcache/benchmarks`](https://github.com/boringcache/benchmarks) so the benchmark keeps:
 
@@ -33,7 +33,9 @@ The story this benchmark is meant to show is:
 - storage footprint in each backend
 - cache reuse through Bazel's documented cache surfaces: BoringCache uses
   `--remote_cache`; actions/cache persists only the directory passed to
-  `--disk_cache`
+  `--disk_cache`; BuildBuddy Cache uses Bazel `--remote_cache` against
+  `grpcs://remote.buildbuddy.io`; Depot Cache uses Bazel `--remote_cache`
+  against `https://cache.depot.dev`
 
 ## Token Model
 
@@ -42,3 +44,8 @@ This repo uses split BoringCache tokens as the standard CI shape:
 - `BORINGCACHE_RESTORE_TOKEN` for read-only restore and proxy access
 - `BORINGCACHE_SAVE_TOKEN` for trusted write paths
 - `BORINGCACHE_API_TOKEN` only where a single bearer variable is still required for compatibility
+- `BUILDBUDDY_API_KEY` for the BuildBuddy Cache lane
+- `DEPOT_TOKEN` for the Depot Cache lane
+- optional `DEPOT_ORG_ID` when using a user token that belongs to multiple Depot organizations
+
+Depot fresh runs use a per-run Bazel `--action_env` scope to keep cold/warm samples isolated without requiring a documented Depot Bazel cache purge API. Depot rolling runs do not use that scope, so they measure normal cross-commit cache reuse.

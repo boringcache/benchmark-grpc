@@ -1,0 +1,369 @@
+name: "gRPC Bazel - BuildBuddy Cache"
+run-name: >-
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'BuildBuddy Rolling' || 'BuildBuddy Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_lane:
+        description: "Benchmark lane"
+        required: false
+        type: choice
+        default: fresh
+        options:
+          - fresh
+          - rolling
+  schedule:
+    - cron: "0 3 * * 5"
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - ".github/workflows/grpc-bazel-boringcache.yml"
+      - ".github/workflows/grpc-bazel-actions-cache.yml"
+      - ".github/workflows/grpc-bazel-buildbuddy-cache.yml"
+      - "README.md"
+      - "scenarios/**"
+      - "scripts/**"
+      - "upstream"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PROJECT_REPO: grpc/grpc
+  BENCHMARK_ID: grpc-bazel
+  BENCHMARK_WORKSPACE: ${{ github.repository }}
+  BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
+  BAZEL_OUTPUT_BASE: /tmp/boringcache-bazel-root/output-base
+
+jobs:
+  seed-cache:
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Commit Build (BuildBuddy Cache, rolling)' || 'Bazel Cold Build (BuildBuddy Cache, fresh)' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    outputs:
+      cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
+      cold_build_seconds: ${{ steps.cold_baseline_build.outputs.build_seconds }}
+      scope_started_at: ${{ steps.scope.outputs.scope_started_at }}
+      remote_instance_name: ${{ steps.scope.outputs.remote_instance_name }}
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare base benchmark source tree
+        run: ./scripts/prepare-source.sh base
+
+      - name: Start seed timing
+        id: seed_timing_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate BuildBuddy API key
+        run: |
+          set -euo pipefail
+          [[ -n "${BUILDBUDDY_API_KEY}" ]] || { echo "Missing BuildBuddy API key" >&2; exit 1; }
+
+      - name: Prepare benchmark scope
+        id: scope
+        run: |
+          set -euo pipefail
+          ref_slug="$(printf '%s' "${GITHUB_REF_NAME:-main}" | tr -c 'A-Za-z0-9._-' '-')"
+          ref_slug="${ref_slug#-}"
+          ref_slug="${ref_slug%-}"
+          ref_slug="${ref_slug:-main}"
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+            remote_instance_name="${BENCHMARK_ID}/buildbuddy-cache/rolling/${ref_slug}"
+          else
+            remote_instance_name="${BENCHMARK_ID}/buildbuddy-cache/run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          fi
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+          echo "remote_instance_name=${remote_instance_name}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-grpc-bazel-build.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
+          bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
+          buildbuddy_api_key="${BUILDBUDDY_API_KEY:?BUILDBUDDY_API_KEY must be set}"
+          remote_instance_name="${BUILDBUDDY_REMOTE_INSTANCE_NAME:?BUILDBUDDY_REMOTE_INSTANCE_NAME must be set}"
+          buildbuddy_args=(
+            "--bes_results_url=https://app.buildbuddy.io/invocation/"
+            "--bes_backend=grpcs://remote.buildbuddy.io"
+            "--remote_cache=grpcs://remote.buildbuddy.io"
+            "--remote_timeout=10m"
+            "--remote_instance_name=${remote_instance_name}"
+            "--remote_header=x-buildbuddy-api-key=${buildbuddy_api_key}"
+          )
+          if [[ "${BUILDBUDDY_REMOTE_UPLOAD_LOCAL_RESULTS:-true}" == "false" ]]; then
+            buildbuddy_args+=("--remote_upload_local_results=false")
+          fi
+
+          max_attempts=3
+          attempt=1
+          while true; do
+            if (cd upstream && ./tools/bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "${buildbuddy_args[@]}" "$BAZEL_TARGET"); then
+              break
+            fi
+
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "Bazel build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+
+            echo "Bazel build failed (attempt ${attempt}/${max_attempts}); retrying..." >&2
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          SH
+          chmod +x ./run-grpc-bazel-build.sh
+
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
+        id: cold_baseline_build
+        env:
+          BUILDBUDDY_REMOTE_INSTANCE_NAME: ${{ steps.scope.outputs.remote_instance_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+            rm -rf "$BAZEL_OUTPUT_USER_ROOT"
+          fi
+
+          phase_start="${{ steps.seed_timing_start.outputs.started_at }}"
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+
+  scenario-builds:
+    name: Bazel Warm rerun (BuildBuddy Cache)
+    needs: seed-cache
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      BUILDBUDDY_REMOTE_INSTANCE_NAME: ${{ needs.seed-cache.outputs.remote_instance_name }}
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare scenario source tree
+        run: ./scripts/prepare-source.sh warm1
+
+      - name: Validate BuildBuddy API key
+        run: |
+          set -euo pipefail
+          [[ -n "${BUILDBUDDY_API_KEY}" ]] || { echo "Missing BuildBuddy API key" >&2; exit 1; }
+
+      - name: Prepare benchmark scope
+        id: scope
+        run: |
+          set -euo pipefail
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-grpc-bazel-build.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          bazel_output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
+          bazel_output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
+          buildbuddy_api_key="${BUILDBUDDY_API_KEY:?BUILDBUDDY_API_KEY must be set}"
+          remote_instance_name="${BUILDBUDDY_REMOTE_INSTANCE_NAME:?BUILDBUDDY_REMOTE_INSTANCE_NAME must be set}"
+          buildbuddy_args=(
+            "--bes_results_url=https://app.buildbuddy.io/invocation/"
+            "--bes_backend=grpcs://remote.buildbuddy.io"
+            "--remote_cache=grpcs://remote.buildbuddy.io"
+            "--remote_timeout=10m"
+            "--remote_instance_name=${remote_instance_name}"
+            "--remote_header=x-buildbuddy-api-key=${buildbuddy_api_key}"
+          )
+          if [[ "${BUILDBUDDY_REMOTE_UPLOAD_LOCAL_RESULTS:-true}" == "false" ]]; then
+            buildbuddy_args+=("--remote_upload_local_results=false")
+          fi
+
+          max_attempts=3
+          attempt=1
+          while true; do
+            if (cd upstream && ./tools/bazel --output_user_root="$bazel_output_root" --output_base="$bazel_output_base" build "${buildbuddy_args[@]}" "$BAZEL_TARGET"); then
+              break
+            fi
+
+            if [[ "$attempt" -ge "$max_attempts" ]]; then
+              echo "Bazel build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+
+            echo "Bazel build failed (attempt ${attempt}/${max_attempts}); retrying..." >&2
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          SH
+          chmod +x ./run-grpc-bazel-build.sh
+
+      - name: Start scenario timing
+        id: scenario_timing_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Clean Bazel for warm build 1
+        run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
+
+      - name: Run warm build 1
+        id: warm1_build
+        env:
+          BUILDBUDDY_REMOTE_UPLOAD_LOCAL_RESULTS: "false"
+        run: |
+          set -euo pipefail
+          phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
+          start="$(date +%s)"
+          ./run-grpc-bazel-build.sh
+          end="$(date +%s)"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+
+      - name: Capture scenario timing
+        id: phase_timing
+        run: |
+          set -euo pipefail
+          seconds=""
+          build_seconds=""
+          seconds="${{ steps.warm1_build.outputs.seconds }}"
+          build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
+          if [[ -z "${seconds}" ]]; then
+            echo "No timing captured for warm1" >&2
+            exit 1
+          fi
+          echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
+      - name: Persist scenario timing artifact
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-phase
+          cat > "benchmark-phase/warm1.env" <<EOF
+          phase=warm1
+          seconds=${{ steps.phase_timing.outputs.seconds }}
+          build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
+          EOF
+      - name: Upload scenario timing artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-buildbuddy-cache-warm1
+          path: benchmark-phase/warm1.env
+          if-no-files-found: error
+
+  finalize-benchmark:
+    name: Finalize benchmark artifacts
+    needs: [seed-cache, scenario-builds]
+    if: ${{ always() && needs.seed-cache.result == 'success' && (needs.scenario-builds.result == 'success' || needs.scenario-builds.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download scenario timing artifacts
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-buildbuddy-cache-*
+          path: benchmark-phase
+          merge-multiple: true
+      - name: Collect scenario timings
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        id: timings
+        run: |
+          set -euo pipefail
+          parse_phase() {
+            local phase="$1"
+            local key="${phase//-/_}"
+            local file="benchmark-phase/${phase}.env"
+            if [[ ! -f "$file" ]]; then
+              echo "Missing timing artifact for phase ${phase}" >&2
+              ls -R benchmark-phase || true
+              exit 1
+            fi
+            local seconds
+            seconds="$(grep "^seconds=" "$file" | head -n1 | cut -d= -f2-)"
+            if [[ -z "${seconds}" ]]; then
+              echo "Timing artifact for phase ${phase} has empty seconds" >&2
+              cat "$file" >&2
+              exit 1
+            fi
+            echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+            local build_seconds
+            build_seconds="$(grep "^build_seconds=" "$file" | head -n1 | cut -d= -f2- || true)"
+            if [[ -n "${build_seconds}" ]]; then
+              echo "${key}_build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          parse_phase warm1
+
+      - name: Capture committed upstream ref
+        id: upstream_ref
+        run: echo "sha=$(git rev-parse HEAD:upstream)" >> "$GITHUB_OUTPUT"
+
+      - name: Write benchmark artifacts
+        id: artifact_files
+        run: |
+          ./scripts/write-benchmark-artifacts.sh \
+            --benchmark "$BENCHMARK_ID" \
+            --strategy "buildbuddy-cache" \
+            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
+            --project-repo "$PROJECT_REPO" \
+            --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
+            --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
+            --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
+            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
+            --cache-storage-bytes "0" \
+            --cache-storage-source "buildbuddy-ui" \
+            --cache-storage-note "BuildBuddy remote Bazel cache storage is visible in the BuildBuddy UI, not the GitHub Actions cache API." \
+            --mode bazel \
+            --adapter bazel \
+            --api-url "grpcs://remote.buildbuddy.io" \
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing BuildBuddy remote Bazel cache namespace {0} and records that commit build only; warm1 follow-up runs are intentionally skipped.', needs.seed-cache.outputs.remote_instance_name) || format('Fresh lane: both phases start from empty local Bazel output roots and use BuildBuddy through Bazel remote_cache=grpcs://remote.buildbuddy.io with run-scoped remote_instance_name {0}. Warm1 rebuilds the same pinned source tree on a fresh runner against the BuildBuddy remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.remote_instance_name) }}"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-buildbuddy-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          path: |
+            ${{ steps.artifact_files.outputs.json_path }}
+            ${{ steps.artifact_files.outputs.md_path }}
+          if-no-files-found: error
+
+      - name: Publish summary
+        run: cat "${{ steps.artifact_files.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
