@@ -154,7 +154,7 @@ fi
 if [[ -n "$tags" ]]; then
   remote_check_json="${output_dir}/remote-tag-check.json"
   remote_check_stderr="${output_dir}/remote-tag-check.stderr.txt"
-  if boringcache check "$workspace" "$tags" --no-git --no-platform --exact --json > "$remote_check_json" 2> "$remote_check_stderr"; then
+  if BORINGCACHE_REQUIRE_SERVER_SIGNATURE=0 boringcache check "$workspace" "$tags" --no-git --no-platform --exact --json > "$remote_check_json" 2> "$remote_check_stderr"; then
     if ! jq -e '.results | type == "array"' "$remote_check_json" >/dev/null 2>&1; then
       mv "$remote_check_json" "${output_dir}/remote-tag-check.txt"
     fi
