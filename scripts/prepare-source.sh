@@ -31,25 +31,11 @@ if old in text:
     path.write_text(text.replace(old, new, 1))
 PY
 
-bazelrc_path="${HOME}/.bazelrc"
-append_bazelrc_line() {
-  local line="$1"
-  if ! grep -Fqx "$line" "$bazelrc_path" 2>/dev/null; then
-    echo "$line" >> "$bazelrc_path"
-  fi
-}
-
-stable_action_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-cc_path="$(command -v gcc-13 || command -v gcc)"
-cxx_path="$(command -v g++-13 || command -v g++)"
-ld_path="$(command -v ld)"
-
-append_bazelrc_line 'common --enable_bzlmod=false'
-append_bazelrc_line 'common --enable_workspace=true'
-append_bazelrc_line 'build --incompatible_strict_action_env'
-append_bazelrc_line "build --action_env=PATH=${stable_action_path}"
-append_bazelrc_line "build --repo_env=CC=${cc_path}"
-append_bazelrc_line "build --repo_env=CXX=${cxx_path}"
-append_bazelrc_line "build --repo_env=LD=${ld_path}"
+if ! grep -Fq 'common --enable_bzlmod=false' "${HOME}/.bazelrc" 2>/dev/null; then
+  echo 'common --enable_bzlmod=false' >> "${HOME}/.bazelrc"
+fi
+if ! grep -Fq 'common --enable_workspace=true' "${HOME}/.bazelrc" 2>/dev/null; then
+  echo 'common --enable_workspace=true' >> "${HOME}/.bazelrc"
+fi
 
 git -C "${repo_root}/upstream" status --short
