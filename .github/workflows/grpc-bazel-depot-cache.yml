@@ -13,6 +13,20 @@ on:
         options:
           - fresh
           - rolling
+      depot_bazel_cache_purge:
+        description: "Depot Bazel cache inspection/purge before fresh seed"
+        required: false
+        type: choice
+        default: off
+        options:
+          - off
+          - dry-run
+          - delete-prefix
+          - delete-all
+      depot_bazel_cache_key_prefix:
+        description: "Depot Bazel key prefix for dry-run/delete-prefix; leave blank only for dry-run or delete-all"
+        required: false
+        type: string
   schedule:
     - cron: "0 3 * * 5"
   pull_request:
@@ -142,6 +156,98 @@ jobs:
           done
           SH
           chmod +x ./run-grpc-bazel-build.sh
+
+      - name: Inspect or purge Depot Bazel cache entries
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane != 'rolling' && inputs.depot_bazel_cache_purge != 'off' }}
+        env:
+          DEPOT_BAZEL_CACHE_PURGE: ${{ inputs.depot_bazel_cache_purge }}
+          DEPOT_BAZEL_CACHE_KEY_PREFIX: ${{ inputs.depot_bazel_cache_key_prefix || '' }}
+        run: |
+          set -euo pipefail
+
+          headers=(
+            -H "Content-Type: application/json"
+            -H "Authorization: Bearer ${DEPOT_TOKEN}"
+          )
+          if [[ -n "${DEPOT_ORG_ID:-}" ]]; then
+            headers+=(-H "x-depot-org: ${DEPOT_ORG_ID}")
+          fi
+
+          list_url="https://cache.depot.dev/depot.cache.v1.CacheService/ListEntries"
+          delete_url="https://cache.depot.dev/depot.cache.v1.CacheService/DeleteEntry"
+          prefix="${DEPOT_BAZEL_CACHE_KEY_PREFIX}"
+          mode="${DEPOT_BAZEL_CACHE_PURGE}"
+          page_token=""
+          total_seen=0
+          total_deleted=0
+
+          case "${mode}" in
+            dry-run)
+              ;;
+            delete-prefix)
+              if [[ -z "${prefix}" ]]; then
+                echo "depot_bazel_cache_purge=delete-prefix requires depot_bazel_cache_key_prefix." >&2
+                exit 1
+              fi
+              ;;
+            delete-all)
+              prefix=""
+              echo "::warning::Deleting all Depot Bazel cache entries for this organization/project. Rolling Depot Bazel will bootstrap until repopulated."
+              ;;
+            *)
+              echo "Unknown Depot Bazel cache purge mode: ${mode}" >&2
+              exit 1
+              ;;
+          esac
+
+          delete_key() {
+            local key="$1"
+            local payload
+            payload="$(jq -nc --arg key "$key" '{entry_type: "bazel", key: $key}')"
+            curl -fsS -X POST "${headers[@]}" "${delete_url}" -d "${payload}" >/dev/null
+          }
+
+          while true; do
+            payload="$(
+              jq -nc \
+                --arg prefix "${prefix}" \
+                --arg page_token "${page_token}" \
+                '{entry_type: "bazel", key_prefix: $prefix, page_size: 1000}
+                 + (if $page_token == "" then {} else {page_token: $page_token} end)'
+            )"
+            response="$(curl -fsS -X POST "${headers[@]}" "${list_url}" -d "${payload}")"
+            mapfile -t keys < <(jq -r '(.entry_ids // .entryIds // [])[] | .key' <<<"${response}")
+            total_seen=$((total_seen + ${#keys[@]}))
+
+            if [[ "${mode}" == "delete-prefix" || "${mode}" == "delete-all" ]] && [[ "${#keys[@]}" -gt 0 ]]; then
+              active=0
+              for key in "${keys[@]}"; do
+                delete_key "${key}" &
+                active=$((active + 1))
+                if [[ "${active}" -ge 16 ]]; then
+                  wait
+                  total_deleted=$((total_deleted + active))
+                  active=0
+                fi
+              done
+              if [[ "${active}" -gt 0 ]]; then
+                wait
+                total_deleted=$((total_deleted + active))
+              fi
+            fi
+
+            page_token="$(jq -r '.next_page_token // .nextPageToken // ""' <<<"${response}")"
+            [[ -n "${page_token}" ]] || break
+          done
+
+          if [[ "${mode}" == "delete-prefix" || "${mode}" == "delete-all" ]]; then
+            echo "Deleted ${total_deleted} Depot Bazel cache entries matching prefix '${prefix:-<all>}'." >> "${GITHUB_STEP_SUMMARY}"
+            if [[ "${mode}" == "delete-all" ]]; then
+              echo "This also clears the rolling Depot Bazel cache universe; run a rolling Depot lane afterward if you need rolling data warmed again." >> "${GITHUB_STEP_SUMMARY}"
+            fi
+          else
+            echo "Depot Bazel cache dry-run found ${total_seen} entries matching prefix '${prefix:-<all>}'." >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
       - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
