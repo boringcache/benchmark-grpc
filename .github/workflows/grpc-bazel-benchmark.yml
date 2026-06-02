@@ -73,9 +73,6 @@ jobs:
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: write
 
   buildbuddy-cache:
     name: Build with BuildBuddy Cache
@@ -83,9 +80,6 @@ jobs:
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: read
 
   depot-cache:
     name: Build with Depot Cache
@@ -95,9 +89,6 @@ jobs:
       depot_bazel_cache_purge: ${{ github.event_name == 'workflow_dispatch' && inputs.depot_bazel_cache_purge || 'off' }}
       depot_bazel_cache_key_prefix: ${{ github.event_name == 'workflow_dispatch' && inputs.depot_bazel_cache_key_prefix || '' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: read
 
   boringcache:
     name: Build with BoringCache
@@ -109,6 +100,3 @@ jobs:
       blob_prefetch_concurrency: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
       oci_stream_through_min_bytes: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: read
