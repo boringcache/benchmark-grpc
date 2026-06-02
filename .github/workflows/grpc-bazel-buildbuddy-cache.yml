@@ -1,6 +1,6 @@
 name: "gRPC Bazel - BuildBuddy Cache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'BuildBuddy Cache Rolling' || 'BuildBuddy Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'BuildBuddy Cache Rolling' || 'BuildBuddy Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -13,21 +13,15 @@ on:
         options:
           - fresh
           - rolling
-  schedule:
-    - cron: "0 3 * * 5"
-  pull_request:
-    paths:
-      - ".gitmodules"
-      - ".github/workflows/grpc-bazel-boringcache.yml"
-      - ".github/workflows/grpc-bazel-actions-cache.yml"
-      - ".github/workflows/grpc-bazel-buildbuddy-cache.yml"
-      - "README.md"
-      - "scenarios/**"
-      - "scripts/**"
-      - "upstream"
+  workflow_call:
+    inputs:
+      cache_lane:
+        required: false
+        type: string
+        default: fresh
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
 
 permissions:
@@ -43,7 +37,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Commit Build (BuildBuddy Cache, rolling)' || 'Bazel Cold Build (BuildBuddy Cache, fresh)' }}
+    name: ${{ inputs.cache_lane == 'rolling' && 'Bazel Commit Build (BuildBuddy Cache, rolling)' || 'Bazel Cold Build (BuildBuddy Cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -87,7 +81,7 @@ jobs:
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             remote_instance_name="${BENCHMARK_ID}/buildbuddy-cache/rolling/${ref_slug}"
           else
             remote_instance_name="${BENCHMARK_ID}/buildbuddy-cache/run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
@@ -135,13 +129,13 @@ jobs:
           SH
           chmod +x ./run-grpc-bazel-build.sh
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
+      - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         env:
           BUILDBUDDY_REMOTE_INSTANCE_NAME: ${{ steps.scope.outputs.remote_instance_name }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
             rm -rf "$BAZEL_OUTPUT_USER_ROOT"
           fi
 
@@ -156,7 +150,7 @@ jobs:
   scenario-builds:
     name: Bazel Warm rerun (BuildBuddy Cache)
     needs: seed-cache
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+    if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -295,14 +289,14 @@ jobs:
           submodules: false
 
       - name: Download scenario timing artifacts
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-buildbuddy-cache-*
           path: benchmark-phase
           merge-multiple: true
       - name: Collect scenario timings
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         id: timings
         run: |
           set -euo pipefail
@@ -341,25 +335,25 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "buildbuddy-cache" \
-            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
+            --lane "${{ inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
-            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
-            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
+            --warm1-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "0" \
             --cache-storage-source "buildbuddy-ui" \
             --cache-storage-note "BuildBuddy remote Bazel cache storage is visible in the BuildBuddy UI, not the GitHub Actions cache API." \
             --mode bazel \
             --adapter bazel \
             --api-url "grpcs://remote.buildbuddy.io" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing BuildBuddy remote Bazel cache namespace {0} and records that commit build only; warm1 follow-up runs are intentionally skipped.', needs.seed-cache.outputs.remote_instance_name) || format('Fresh lane: both phases start from empty local Bazel output roots and use BuildBuddy through Bazel remote_cache=grpcs://remote.buildbuddy.io with run-scoped remote_instance_name {0}. Warm1 rebuilds the same pinned source tree on a fresh runner against the BuildBuddy remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.remote_instance_name) }}"
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing BuildBuddy remote Bazel cache namespace {0} and records that commit build only; warm1 follow-up runs are intentionally skipped.', needs.seed-cache.outputs.remote_instance_name) || format('Fresh lane: both phases start from empty local Bazel output roots and use BuildBuddy through Bazel remote_cache=grpcs://remote.buildbuddy.io with run-scoped remote_instance_name {0}. Warm1 rebuilds the same pinned source tree on a fresh runner against the BuildBuddy remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.remote_instance_name) }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-buildbuddy-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-${{ env.BENCHMARK_ID }}-buildbuddy-cache-${{ inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}

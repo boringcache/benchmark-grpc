@@ -1,6 +1,6 @@
 name: "gRPC Bazel - Depot Cache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Depot Cache Rolling' || 'Depot Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'Depot Cache Rolling' || 'Depot Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -27,21 +27,23 @@ on:
         description: "Depot Bazel key prefix for dry-run/delete-prefix; leave blank only for dry-run or delete-all"
         required: false
         type: string
-  schedule:
-    - cron: "0 3 * * 5"
-  pull_request:
-    paths:
-      - ".gitmodules"
-      - ".github/workflows/grpc-bazel-boringcache.yml"
-      - ".github/workflows/grpc-bazel-actions-cache.yml"
-      - ".github/workflows/grpc-bazel-depot-cache.yml"
-      - "README.md"
-      - "scenarios/**"
-      - "scripts/**"
-      - "upstream"
+  workflow_call:
+    inputs:
+      cache_lane:
+        required: false
+        type: string
+        default: fresh
+      depot_bazel_cache_purge:
+        required: false
+        type: string
+        default: off
+      depot_bazel_cache_key_prefix:
+        required: false
+        type: string
+        default: ""
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
 
 permissions:
@@ -57,7 +59,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Bazel Commit Build (Depot Cache, rolling)' || 'Bazel Cold Build (Depot Cache, fresh)' }}
+    name: ${{ inputs.cache_lane == 'rolling' && 'Bazel Commit Build (Depot Cache, rolling)' || 'Bazel Cold Build (Depot Cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -103,7 +105,7 @@ jobs:
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             cache_scope="${BENCHMARK_ID}/depot-cache/rolling/${ref_slug}"
             action_scope=""
           else
@@ -158,7 +160,7 @@ jobs:
           chmod +x ./run-grpc-bazel-build.sh
 
       - name: Inspect or purge Depot Bazel cache entries
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane != 'rolling' && inputs.depot_bazel_cache_purge != 'off' }}
+        if: ${{ inputs.cache_lane != 'rolling' && inputs.depot_bazel_cache_purge != 'off' }}
         env:
           DEPOT_BAZEL_CACHE_PURGE: ${{ inputs.depot_bazel_cache_purge }}
           DEPOT_BAZEL_CACHE_KEY_PREFIX: ${{ inputs.depot_bazel_cache_key_prefix || '' }}
@@ -253,13 +255,13 @@ jobs:
             echo "Depot Bazel cache dry-run found ${total_seen} entries matching prefix '${prefix:-<all>}'." >> "${GITHUB_STEP_SUMMARY}"
           fi
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
+      - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         env:
           DEPOT_BAZEL_ACTION_SCOPE: ${{ steps.scope.outputs.action_scope }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
             rm -rf "$BAZEL_OUTPUT_USER_ROOT"
           fi
 
@@ -274,7 +276,7 @@ jobs:
   scenario-builds:
     name: Bazel Warm rerun (Depot Cache)
     needs: seed-cache
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+    if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -417,14 +419,14 @@ jobs:
           submodules: false
 
       - name: Download scenario timing artifacts
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-*
           path: benchmark-phase
           merge-multiple: true
       - name: Collect scenario timings
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         id: timings
         run: |
           set -euo pipefail
@@ -463,25 +465,25 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "depot-cache" \
-            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
+            --lane "${{ inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
-            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
-            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
+            --warm1-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "0" \
             --cache-storage-source "depot-cache-ui" \
             --cache-storage-note "Depot remote Bazel cache storage is visible in the Depot Cache UI, not the GitHub Actions cache API." \
             --mode bazel \
             --adapter bazel \
             --api-url "https://cache.depot.dev" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing Depot remote Bazel cache for this organization and records that commit build only; warm1 follow-up runs are intentionally skipped. Local benchmark scope label: {0}.', needs.seed-cache.outputs.cache_scope) || format('Fresh lane: both phases start from empty local Bazel output roots and use Depot Cache through Bazel remote_cache=https://cache.depot.dev. Because Depot Cache does not expose a documented Bazel purge/namespace knob, this fresh lane scopes Bazel action keys with DEPOT_BENCHMARK_CACHE_SCOPE={0}; warm1 rebuilds the same pinned source tree on a fresh runner against the Depot remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.action_scope) }}"
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing Depot remote Bazel cache for this organization and records that commit build only; warm1 follow-up runs are intentionally skipped. Local benchmark scope label: {0}.', needs.seed-cache.outputs.cache_scope) || format('Fresh lane: both phases start from empty local Bazel output roots and use Depot Cache through Bazel remote_cache=https://cache.depot.dev. Because Depot Cache does not expose a documented Bazel purge/namespace knob, this fresh lane scopes Bazel action keys with DEPOT_BENCHMARK_CACHE_SCOPE={0}; warm1 rebuilds the same pinned source tree on a fresh runner against the Depot remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.action_scope) }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-depot-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-${{ env.BENCHMARK_ID }}-depot-cache-${{ inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}
