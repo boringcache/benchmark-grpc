@@ -64,21 +64,21 @@ permissions:
 
 jobs:
   github-actions-cache:
-    name: Build with GitHub Actions Cache
+    name: GHA
     uses: ./.github/workflows/grpc-bazel-actions-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
 
   buildbuddy-cache:
-    name: Build with BuildBuddy Cache
+    name: BuildBuddy
     uses: ./.github/workflows/grpc-bazel-buildbuddy-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
 
   depot-cache:
-    name: Build with Depot Cache
+    name: Depot
     uses: ./.github/workflows/grpc-bazel-depot-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
@@ -87,7 +87,7 @@ jobs:
     secrets: inherit
 
   boringcache:
-    name: Build with BoringCache
+    name: BC
     uses: ./.github/workflows/grpc-bazel-boringcache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
