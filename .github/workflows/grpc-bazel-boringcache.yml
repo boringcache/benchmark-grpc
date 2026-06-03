@@ -73,7 +73,7 @@ env:
   
 jobs:
   prepare-cli:
-    name: Prepare benchmark CLI (release by default, internal override only)
+    name: CLI
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
