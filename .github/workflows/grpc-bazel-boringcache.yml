@@ -191,7 +191,7 @@ jobs:
     env:
       BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-bazel-root
       BAZEL_REMOTE_CACHE_TAG: ${{ needs.prepare-cli.outputs.bazel_remote_cache_tag }}
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=grpc-bazel,phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}
     outputs:
       tags_csv: ${{ steps.resolved_seed_tag.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -212,7 +212,7 @@ jobs:
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
-      - name: Start seed timing
+      - name: Start build timing
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
@@ -346,7 +346,7 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           set -euo pipefail
-          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}"
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-${diagnostic_phase}" \
             --workspace "$BENCHMARK_WORKSPACE" \
@@ -364,15 +364,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}-boringcache
-          path: boringcache-diag-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}-boringcache
+          path: boringcache-diag-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}
           if-no-files-found: warn
 
       - name: Capture BoringCache session summary
         if: always()
         run: |
           set -euo pipefail
-          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}"
           status_path="boringcache-diag-${diagnostic_phase}/proxy-status-${diagnostic_phase}.json"
           mkdir -p benchmark-session-summary
           if [[ -s "$status_path" ]]; then
@@ -555,7 +555,7 @@ jobs:
         run: |
           set -euo pipefail
           start="$(date +%s)"
-          ./run-grpc-bazel-build.sh --profile=/tmp/bazel-warm1-profile.gz 2>&1 | tee /tmp/bazel-warm1-build.log
+          ./run-grpc-bazel-build.sh --profile=/tmp/bazel-warm-profile.gz 2>&1 | tee /tmp/bazel-warm-build.log
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
@@ -568,8 +568,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: bazel-warm1-profile
-          path: /tmp/bazel-warm1-profile.gz
+          name: bazel-warm-profile
+          path: /tmp/bazel-warm-profile.gz
           if-no-files-found: warn
 
       - name: Collect BoringCache diagnostics
@@ -579,10 +579,10 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
-            --output-dir "boringcache-diag-warm1" \
+            --output-dir "boringcache-diag-warm" \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "${{ steps.resolved_scenario_tag.outputs.tags_csv }}" \
-            --phase "warm1" \
+            --phase "warm" \
             --cache-tag "${{ steps.resolved_scenario_tag.outputs.cache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
@@ -595,18 +595,18 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          out_dir="boringcache-diag-warm1"
+          out_dir="boringcache-diag-warm"
           mkdir -p "$out_dir"
-          if [[ -f /tmp/bazel-warm1-build.log ]]; then
-            cp /tmp/bazel-warm1-build.log "${out_dir}/bazel-warm1-build.log"
+          if [[ -f /tmp/bazel-warm-build.log ]]; then
+            cp /tmp/bazel-warm-build.log "${out_dir}/bazel-warm-build.log"
           fi
-          if [[ -f /tmp/bazel-warm1-profile.gz ]]; then
-            cp /tmp/bazel-warm1-profile.gz "${out_dir}/bazel-warm1-profile.gz"
+          if [[ -f /tmp/bazel-warm-profile.gz ]]; then
+            cp /tmp/bazel-warm-profile.gz "${out_dir}/bazel-warm-profile.gz"
             python3 ./scripts/summarize-bazel-profile.py \
-              --profile /tmp/bazel-warm1-profile.gz \
-              --build-log /tmp/bazel-warm1-build.log \
+              --profile /tmp/bazel-warm-profile.gz \
+              --build-log /tmp/bazel-warm-build.log \
               --output-dir "$out_dir" \
-              --phase "warm1"
+              --phase "warm"
           fi
 
       - name: Upload BoringCache diagnostics
@@ -614,7 +614,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm1-boringcache
-          path: boringcache-diag-warm1
+          path: boringcache-diag-warm
           if-no-files-found: warn
 
       - name: Capture scenario timing
@@ -624,7 +624,7 @@ jobs:
           build_seconds=""
           build_seconds="${{ steps.warm1_build.outputs.seconds }}"
           if [[ -z "${build_seconds}" ]]; then
-            echo "No timing captured for warm1" >&2
+            echo "No timing captured for warm" >&2
             exit 1
           fi
           restore_seconds=0
@@ -651,7 +651,7 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm1
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm
           path: benchmark-phase/warm1.env
           if-no-files-found: error
 
@@ -789,7 +789,7 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: the cold build runs from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while populating only the proxy-backed remote cache. Warm1 runs on a fresh runner with an empty Bazel output root, configures the same run-scoped remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: the cold build runs from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while populating only the proxy-backed remote cache. Warm runs on a fresh runner with an empty Bazel output root, configures the same run-scoped remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}" \
             "${cache_summary_args[@]}"
 
       - name: Write phase timing breakdown

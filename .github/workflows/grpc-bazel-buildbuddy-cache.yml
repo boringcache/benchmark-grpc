@@ -64,7 +64,7 @@ jobs:
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
-      - name: Start seed timing
+      - name: Start build timing
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
@@ -254,7 +254,7 @@ jobs:
           seconds="${{ steps.warm1_build.outputs.seconds }}"
           build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
           if [[ -z "${seconds}" ]]; then
-            echo "No timing captured for warm1" >&2
+            echo "No timing captured for warm" >&2
             exit 1
           fi
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
@@ -271,7 +271,7 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-buildbuddy-cache-warm1
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-buildbuddy-cache-warm
           path: benchmark-phase/warm1.env
           if-no-files-found: error
 
@@ -348,7 +348,7 @@ jobs:
             --mode bazel \
             --adapter bazel \
             --api-url "grpcs://remote.buildbuddy.io" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing BuildBuddy remote Bazel cache namespace {0} and records that commit build only; warm1 follow-up runs are intentionally skipped.', needs.seed-cache.outputs.remote_instance_name) || format('Fresh lane: both phases start from empty local Bazel output roots and use BuildBuddy through Bazel remote_cache=grpcs://remote.buildbuddy.io with run-scoped remote_instance_name {0}. Warm1 rebuilds the same pinned source tree on a fresh runner against the BuildBuddy remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.remote_instance_name) }}"
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing BuildBuddy remote Bazel cache namespace {0} and records that commit build only; warm follow-up runs are intentionally skipped.', needs.seed-cache.outputs.remote_instance_name) || format('Fresh lane: both phases start from empty local Bazel output roots and use BuildBuddy through Bazel remote_cache=grpcs://remote.buildbuddy.io with run-scoped remote_instance_name {0}. Warm rebuilds the same pinned source tree on a fresh runner against the BuildBuddy remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.remote_instance_name) }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6

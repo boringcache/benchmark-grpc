@@ -30,7 +30,7 @@ on:
         required: false
         type: string
       depot_bazel_cache_purge:
-        description: "Depot Bazel cache inspection/purge before fresh seed"
+        description: "Depot Bazel cache inspection/purge before fresh cold build"
         required: false
         type: choice
         default: off

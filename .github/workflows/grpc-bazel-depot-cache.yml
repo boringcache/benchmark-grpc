@@ -14,7 +14,7 @@ on:
           - fresh
           - rolling
       depot_bazel_cache_purge:
-        description: "Depot Bazel cache inspection/purge before fresh seed"
+        description: "Depot Bazel cache inspection/purge before fresh cold build"
         required: false
         type: choice
         default: off
@@ -88,7 +88,7 @@ jobs:
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
-      - name: Start seed timing
+      - name: Start build timing
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
@@ -384,7 +384,7 @@ jobs:
           seconds="${{ steps.warm1_build.outputs.seconds }}"
           build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
           if [[ -z "${seconds}" ]]; then
-            echo "No timing captured for warm1" >&2
+            echo "No timing captured for warm" >&2
             exit 1
           fi
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
@@ -401,7 +401,7 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-warm1
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-warm
           path: benchmark-phase/warm1.env
           if-no-files-found: error
 
@@ -478,7 +478,7 @@ jobs:
             --mode bazel \
             --adapter bazel \
             --api-url "https://cache.depot.dev" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing Depot remote Bazel cache for this organization and records that commit build only; warm1 follow-up runs are intentionally skipped. Local benchmark scope label: {0}.', needs.seed-cache.outputs.cache_scope) || format('Fresh lane: both phases start from empty local Bazel output roots and use Depot Cache through Bazel remote_cache=https://cache.depot.dev. Because Depot Cache does not expose a documented Bazel purge/namespace knob, this fresh lane scopes Bazel action keys with DEPOT_BENCHMARK_CACHE_SCOPE={0}; warm1 rebuilds the same pinned source tree on a fresh runner against the Depot remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.action_scope) }}"
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && format('Rolling lane: this run builds the current upstream commit as-is against the existing Depot remote Bazel cache for this organization and records that commit build only; warm follow-up runs are intentionally skipped. Local benchmark scope label: {0}.', needs.seed-cache.outputs.cache_scope) || format('Fresh lane: both phases start from empty local Bazel output roots and use Depot Cache through Bazel remote_cache=https://cache.depot.dev. Because Depot Cache does not expose a documented Bazel purge/namespace knob, this fresh lane scopes Bazel action keys with DEPOT_BENCHMARK_CACHE_SCOPE={0}; warm1 rebuilds the same pinned source tree on a fresh runner against the Depot remote cache populated by the cold build, with local-result uploads disabled during warm verification.', needs.seed-cache.outputs.action_scope) }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
