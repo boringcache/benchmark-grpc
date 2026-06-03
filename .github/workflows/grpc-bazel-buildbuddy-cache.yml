@@ -228,10 +228,10 @@ jobs:
         id: scenario_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Clean Bazel for warm build 1
+      - name: Clean Bazel for warm build
         run: rm -rf "$BAZEL_OUTPUT_USER_ROOT"
 
-      - name: Run warm build 1
+      - name: Run warm build
         id: warm1_build
         env:
           BUILDBUDDY_REMOTE_UPLOAD_LOCAL_RESULTS: "false"

@@ -550,7 +550,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run warm build 1
+      - name: Run warm build
         id: warm1_build
         run: |
           set -euo pipefail
