@@ -613,7 +613,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm1-boringcache
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm-boringcache
           path: boringcache-diag-warm
           if-no-files-found: warn
 
