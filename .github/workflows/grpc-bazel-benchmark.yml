@@ -13,20 +13,6 @@ on:
         options:
           - fresh
           - rolling
-      depot_bazel_cache_purge:
-        description: "Depot Bazel cache inspection/purge before fresh cold build"
-        required: false
-        type: choice
-        default: off
-        options:
-          - off
-          - dry-run
-          - delete-prefix
-          - delete-all
-      depot_bazel_cache_key_prefix:
-        description: "Depot Bazel key prefix for dry-run/delete-prefix; leave blank only for dry-run or delete-all"
-        required: false
-        type: string
   schedule:
     - cron: "0 3 * * 5"
   pull_request:
@@ -66,8 +52,6 @@ jobs:
     uses: ./.github/workflows/grpc-bazel-depot-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
-      depot_bazel_cache_purge: ${{ github.event_name == 'workflow_dispatch' && inputs.depot_bazel_cache_purge || 'off' }}
-      depot_bazel_cache_key_prefix: ${{ github.event_name == 'workflow_dispatch' && inputs.depot_bazel_cache_key_prefix || '' }}
     secrets: inherit
 
   boringcache:

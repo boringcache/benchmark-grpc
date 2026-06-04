@@ -48,8 +48,6 @@ This repo uses split BoringCache tokens as the standard CI shape:
 - `DEPOT_TOKEN` for the Depot Cache lane
 - optional `DEPOT_ORG_ID` when using a user token that belongs to multiple Depot organizations
 
-Depot fresh runs use a per-run Bazel `--action_env` scope to keep cold/warm samples isolated. They also expose a manual `depot_bazel_cache_purge` input (`off`, `dry-run`, `delete-prefix`, or `delete-all`) that talks to Depot Cache's Bazel entry API before the fresh seed. Leave purge off for normal runs; use dry-run before delete.
-
-`delete-all` clears the same Depot Bazel cache universe used by rolling runs. Use it only for a deliberate cold-cache proof, then expect the next Depot rolling run to bootstrap or run one rolling warm-up afterward.
+Depot fresh runs use a per-run Bazel `--action_env` scope to keep cold/warm samples isolated. Rolling runs use the stable rolling cache scope for the branch.
 
 Depot rolling runs do not use the per-run scope and do not purge, so they measure normal cross-commit cache reuse.
