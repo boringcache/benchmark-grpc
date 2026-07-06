@@ -22,7 +22,6 @@ on:
       - ".github/workflows/grpc-bazel-actions-cache.yml"
       - ".github/workflows/grpc-bazel-boringcache.yml"
       - ".github/workflows/grpc-bazel-buildbuddy-cache.yml"
-      - ".github/workflows/grpc-bazel-depot-cache.yml"
       - "README.md"
       - "scenarios/**"
       - "scripts/**"
@@ -43,13 +42,6 @@ jobs:
   buildbuddy-cache:
     name: BuildBuddy
     uses: ./.github/workflows/grpc-bazel-buildbuddy-cache.yml
-    with:
-      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
-    secrets: inherit
-
-  depot-cache:
-    name: Depot
-    uses: ./.github/workflows/grpc-bazel-depot-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
