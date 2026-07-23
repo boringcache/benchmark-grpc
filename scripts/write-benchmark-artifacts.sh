@@ -42,8 +42,8 @@
 #     are emitted here. New fields are nullable and never required
 #     by the aggregator. Build-only/setup splits and Docker rolling
 #     commit-build fields are emitted with nullable warm fields.
-#   - GitHub run context is emitted uniformly for every lane so native,
-#     OCI, ECR, and Actions Cache artifacts can be compared by run id,
+#   - GitHub run context is emitted uniformly for every lane so BoringCache
+#     and Actions Cache artifacts can be compared by run id,
 #     run number, and attempt without guessing from artifact names.
 #
 set -euo pipefail
@@ -806,15 +806,8 @@ native_tool_payload_from_inputs() {
     return
   fi
 
-  local stats_path=""
-  local tool="${native_tool_kind:-}"
-  if [[ -n "$native_tool_stats_file" ]]; then
-    stats_path="$native_tool_stats_file"
-    tool="${tool:-${adapter:-$mode}}"
-  elif [[ -n "$sccache_stats_file" ]]; then
-    stats_path="$sccache_stats_file"
-    tool="${tool:-sccache}"
-  fi
+  local stats_path="${native_tool_stats_file:-$sccache_stats_file}"
+  local tool="${native_tool_kind:-${adapter:-$mode}}"
   if [[ -n "$stats_path" ]]; then
     case "$tool" in
       sccache|rust-sccache|"")
@@ -1737,6 +1730,7 @@ if [[ "$single_phase_proof" == "true" ]]; then
     --arg validity_reason "$validity_reason" \
     --arg cache_import_status "$effective_cache_import_status" \
     --arg raw_cache_import_status "$raw_cache_import_status" \
+    --arg prior_cache_state "$slow_prior_cache_state" \
     --arg cache_reuse_status "$cache_reuse_status" \
     --arg rolling_update_kind "$rolling_reseed_kind" \
     --arg rolling_update_reason "$reseed_reason" \
@@ -1754,6 +1748,7 @@ if [[ "$single_phase_proof" == "true" ]]; then
       "validity_reason": ($validity_reason | blank_to_null),
       "cache_import_status": ($cache_import_status | blank_to_null),
       "raw_cache_import_status": ($raw_cache_import_status | blank_to_null),
+      "prior_cache_state": ($prior_cache_state | blank_to_null),
       "cache_reuse_status": ($cache_reuse_status | blank_to_null)
     }
     + (
@@ -1811,6 +1806,7 @@ else
     --arg validity_reason "$validity_reason" \
     --arg cache_import_status "$effective_cache_import_status" \
     --arg raw_cache_import_status "$raw_cache_import_status" \
+    --arg prior_cache_state "$slow_prior_cache_state" \
     --arg cache_reuse_status "$cache_reuse_status" \
     --arg rolling_reseed_kind "$rolling_reseed_kind" \
     --arg reseed_reason "$reseed_reason" \
@@ -1830,6 +1826,7 @@ else
       "validity_reason": ($validity_reason | blank_to_null),
       "cache_import_status": ($cache_import_status | blank_to_null),
       "raw_cache_import_status": ($raw_cache_import_status | blank_to_null),
+      "prior_cache_state": ($prior_cache_state | blank_to_null),
       "cache_reuse_status": ($cache_reuse_status | blank_to_null),
       "rolling_reseed": $rolling_reseed,
       "steady_state_candidate": $steady_state_candidate,
