@@ -521,6 +521,7 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_REQUIRE_SERVER_SIGNATURE: "0"
+          BORINGCACHE_CHECK_STRICT: "1"
         run: |
           tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
           mkdir -p benchmark-storage
