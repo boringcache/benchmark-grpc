@@ -1,7 +1,7 @@
 workspace = "boringcache/benchmark-grpc"
 
 [adapters.bazel]
-tag = "grpc-bazel"
+tag = "grpc-bazel-local"
 no-platform = true
 no-git = true
 
