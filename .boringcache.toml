@@ -1,5 +1,10 @@
 workspace = "boringcache/benchmark-grpc"
 
+[adapters.bazel]
+tag = "grpc-bazel"
+no-platform = true
+no-git = true
+
 # Bazel remote-cache benchmark. The measured BoringCache surface is
 # boringcache/one mode=bazel configuring Bazel's --remote_cache through
 # the proxy. Do not archive Bazel's output root or local disk cache here;
