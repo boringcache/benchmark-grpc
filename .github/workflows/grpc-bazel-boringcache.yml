@@ -139,6 +139,8 @@ jobs:
           force: ${{ inputs.cache_lane == 'rolling' }}
           proxy-no-git: true
           proxy-no-platform: true
+          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
+          fail-on-cache-error: ${{ inputs.cache_lane == 'fresh' }}
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -307,6 +309,7 @@ jobs:
           no-platform: true
           read-only: true
           save-policy: off
+          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
           proxy-no-git: true
           proxy-no-platform: true
           verbose: true
