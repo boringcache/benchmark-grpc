@@ -309,6 +309,7 @@ jobs:
           no-platform: true
           read-only: true
           save-policy: off
+          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
           proxy-no-git: true
           proxy-no-platform: true
           verbose: true
