@@ -127,13 +127,13 @@ jobs:
 
       - name: Configure boringcache/one
         id: bazel_cache_release
-        uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27
+        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: bazel
+          trust-policy: publish
           force: ${{ inputs.cache_lane == 'rolling' }}
-          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
           fail-on-cache-error: ${{ inputs.cache_lane == 'fresh' }}
           verbose: true
         env:
@@ -292,14 +292,12 @@ jobs:
 
       - name: Configure boringcache/one
         id: bazel_cache_release
-        uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27
+        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: bazel
-          read-only: true
-          save-policy: off
-          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
+          trust-policy: restore
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
