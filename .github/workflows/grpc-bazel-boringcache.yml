@@ -127,24 +127,18 @@ jobs:
 
       - name: Configure boringcache/one
         id: bazel_cache_release
-        uses: boringcache/one@v1
+        uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27
         with:
-          setup: mise
+          setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: bazel
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          cache-runtime: false
-          no-platform: true
           force: ${{ inputs.cache_lane == 'rolling' }}
-          proxy-no-git: true
-          proxy-no-platform: true
           save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
           fail-on-cache-error: ${{ inputs.cache_lane == 'fresh' }}
           verbose: true
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
-          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 
       - name: Capture resolved BoringCache tag
         id: resolved_seed_tag
@@ -179,7 +173,7 @@ jobs:
       - name: Collect BoringCache diagnostics
         if: always()
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           set -euo pipefail
           diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}"
@@ -298,23 +292,17 @@ jobs:
 
       - name: Configure boringcache/one
         id: bazel_cache_release
-        uses: boringcache/one@v1
+        uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27
         with:
-          setup: mise
+          setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: bazel
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cache-tag: ${{ env.BAZEL_REMOTE_CACHE_TAG }}
-          cache-runtime: false
-          no-platform: true
           read-only: true
           save-policy: off
           save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
-          proxy-no-git: true
-          proxy-no-platform: true
           verbose: true
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
 
       - name: Capture resolved BoringCache tag
         id: resolved_scenario_tag
@@ -373,7 +361,7 @@ jobs:
       - name: Collect BoringCache diagnostics
         if: always()
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
@@ -464,15 +452,11 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Install BoringCache CLI with boringcache/one
-        uses: boringcache/one@v1
-        with:
-          setup: none
-          cli-version: ${{ inputs.cli_version }}
-          mode: archive
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cache-runtime: false
-
+      - name: Install BoringCache CLI
+        run: >-
+          ./scripts/install-boringcache-cli.sh
+          "${{ inputs.cli_version }}"
+          "linux-amd64"
       - name: Verify BoringCache CLI
         run: boringcache --version
 
@@ -522,7 +506,7 @@ jobs:
       - name: Measure BoringCache storage usage
         id: cache_size
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_REQUIRE_SERVER_SIGNATURE: "0"
         run: |
           tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
@@ -550,7 +534,7 @@ jobs:
       - name: Write benchmark artifacts
         id: artifact_files
         env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           cache_summary_args=()
           if [[ -s benchmark-session-summary/benchmark-session-summary.json ]]; then
@@ -571,7 +555,7 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: the cold build runs from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while populating only the proxy-backed remote cache. Warm runs on a fresh runner with an empty Bazel output root, configures the same run-scoped remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped. BoringCache runs Bazel in remote-cache mode only: no Bazel output-root or disk-cache archive is restored or saved.' || 'Fresh lane: the cold build runs from empty local Bazel state with the BoringCache Bazel remote cache enabled and records cold timing while populating only the proxy-backed remote cache. Warm runs on a fresh runner with an empty Bazel output root, configures the same plan-owned remote cache in read-only mode, and measures remote-cache hits without restoring a local Bazel disk-cache/output-root archive.' }}" \
             "${cache_summary_args[@]}"
 
       - name: Write phase timing breakdown
