@@ -6,7 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       cli_version:
-        description: "Optional BoringCache CLI release tag for canary runs."
+        description: "Optional exact BoringCache CLI release tag."
+        required: false
+        type: string
+        default: ""
+      benchmark_id_suffix:
+        description: "Optional suffix for isolated comparison runs."
         required: false
         type: string
         default: ""
@@ -18,24 +23,22 @@ permissions:
   actions: write
 
 jobs:
-  github-actions-cache:
-    name: GHA
-    uses: ./.github/workflows/grpc-bazel-actions-cache.yml
+  benchmark:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GHA
+            strategy: actions-cache
+          - name: BuildBuddy
+            strategy: buildbuddy
+          - name: BC
+            strategy: boringcache
+    uses: ./.github/workflows/reusable-grpc-bazel-benchmark.yml
     with:
+      strategy: ${{ matrix.strategy }}
       cache_lane: fresh
-    secrets: inherit
-
-  buildbuddy-cache:
-    name: BuildBuddy
-    uses: ./.github/workflows/grpc-bazel-buildbuddy-cache.yml
-    with:
-      cache_lane: fresh
-    secrets: inherit
-
-  boringcache:
-    name: BC
-    uses: ./.github/workflows/grpc-bazel-boringcache.yml
-    with:
-      cache_lane: fresh
+      benchmark_id: ${{ format('grpc-bazel{0}', inputs.benchmark_id_suffix) }}
       cli_version: ${{ inputs.cli_version }}
     secrets: inherit

@@ -1,0 +1,154 @@
+name: "Reusable gRPC Bazel Benchmark"
+
+on:
+  workflow_call:
+    inputs:
+      strategy:
+        required: true
+        type: string
+      cache_lane:
+        required: true
+        type: string
+      benchmark_id:
+        required: true
+        type: string
+      cli_version:
+        required: false
+        type: string
+        default: ""
+
+env:
+  BENCHMARK_ID: ${{ inputs.benchmark_id }}
+  CACHE_LANE: ${{ inputs.cache_lane }}
+  BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-grpc-bazel/output-root
+  BAZEL_OUTPUT_BASE: /tmp/boringcache-grpc-bazel/output-base
+  BAZEL_DISK_CACHE: /tmp/boringcache-grpc-bazel/disk-cache
+  BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
+
+jobs:
+  publish:
+    name: ${{ inputs.cache_lane == 'rolling' && 'Commit' || 'Cold' }}
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 300
+    outputs:
+      cohort: ${{ steps.scope.outputs.cohort }}
+      gha_key: ${{ steps.scope.outputs.gha_key }}
+      buildbuddy_instance: ${{ steps.scope.outputs.buildbuddy_instance }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+      - name: Checkout pinned gRPC source
+        run: |
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+      - name: Prepare clean gRPC source
+        run: ./scripts/prepare-source.sh base
+      - name: Select the cache cohort
+        id: scope
+        run: |
+          set -euo pipefail
+          ref_slug="$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+          ref_slug="${ref_slug#-}"
+          ref_slug="${ref_slug%-}"
+          ref_slug="${ref_slug:-main}"
+          if [[ "$CACHE_LANE" == "rolling" ]]; then
+            cohort="${BENCHMARK_ID}-rolling-${ref_slug}"
+            gha_prefix="ac-${cohort}-"
+            gha_key="${gha_prefix}r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            buildbuddy_instance="${BENCHMARK_ID}/rolling/${ref_slug}"
+          else
+            cohort="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            gha_prefix="ac-${cohort}-"
+            gha_key="${gha_prefix}cold"
+            buildbuddy_instance="${BENCHMARK_ID}/run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          fi
+          ./scripts/scope-boringcache-run.sh "$cohort"
+          {
+            echo "cohort=${cohort}"
+            echo "gha_prefix=${gha_prefix}"
+            echo "gha_key=${gha_key}"
+            echo "buildbuddy_instance=${buildbuddy_instance}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore rolling GitHub Actions cache
+        if: inputs.strategy == 'actions-cache' && inputs.cache_lane == 'rolling'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.BAZEL_DISK_CACHE }}
+          key: ${{ steps.scope.outputs.gha_key }}
+          restore-keys: ${{ steps.scope.outputs.gha_prefix }}
+      - name: Configure BoringCache
+        if: inputs.strategy == 'boringcache'
+        uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: bazel
+          trust-policy: publish
+          fail-on-cache-error: true
+          metadata-hints: benchmark=${{ inputs.benchmark_id }},phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'fresh-cold' }}
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
+      - name: Build the gRPC target
+        env:
+          BAZEL_CACHE_STRATEGY: ${{ inputs.strategy }}
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          BUILDBUDDY_REMOTE_INSTANCE_NAME: ${{ steps.scope.outputs.buildbuddy_instance }}
+        run: ./scripts/run-grpc-bazel-build.sh
+      - name: Save GitHub Actions cache
+        if: inputs.strategy == 'actions-cache'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.BAZEL_DISK_CACHE }}
+          key: ${{ steps.scope.outputs.gha_key }}
+
+  restore:
+    name: Warm
+    needs: publish
+    if: inputs.cache_lane == 'fresh'
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+      - name: Checkout pinned gRPC source
+        run: |
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+      - name: Prepare clean gRPC source
+        run: ./scripts/prepare-source.sh warm1
+      - name: Select the published cache cohort
+        run: ./scripts/scope-boringcache-run.sh "${{ needs.publish.outputs.cohort }}"
+      - name: Restore exact GitHub Actions cache
+        if: inputs.strategy == 'actions-cache'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.BAZEL_DISK_CACHE }}
+          key: ${{ needs.publish.outputs.gha_key }}
+          fail-on-cache-miss: true
+      - name: Configure exact BoringCache restore
+        if: inputs.strategy == 'boringcache'
+        uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: bazel
+          trust-policy: restore
+          fail-on-cache-miss: true
+          fail-on-cache-error: true
+          metadata-hints: benchmark=${{ inputs.benchmark_id }},phase=fresh-warm
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
+      - name: Build the gRPC target from the exact cache
+        env:
+          BAZEL_CACHE_STRATEGY: ${{ inputs.strategy }}
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          BUILDBUDDY_REMOTE_INSTANCE_NAME: ${{ needs.publish.outputs.buildbuddy_instance }}
+          BUILDBUDDY_REMOTE_UPLOAD_LOCAL_RESULTS: "false"
+        run: ./scripts/run-grpc-bazel-build.sh
