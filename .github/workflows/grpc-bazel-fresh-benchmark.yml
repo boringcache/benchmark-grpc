@@ -20,6 +20,7 @@ env:
   BAZEL_OUTPUT_BASE: /tmp/boringcache-grpc-bazel/output-base
   BAZEL_DISK_CACHE: /tmp/boringcache-grpc-bazel/disk-cache
   BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
+  BENCHMARK_ID: ${{ format('grpc-bazel{0}', inputs.benchmark_id_suffix) }}
 jobs:
   cold:
     name: ${{ matrix.provider }} gRPC Bazel cold
@@ -47,3 +48,40 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/grpc-bazel-benchmark
         with: {strategy: "${{ matrix.strategy }}", cache_lane: fresh, phase: warm, benchmark_id: "${{ format('grpc-bazel{0}', inputs.benchmark_id_suffix) }}", cli_version: "${{ inputs.cli_version }}"}
+  report:
+    name: gRPC Bazel fresh report
+    needs: warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download the benchmark phase evidence
+        uses: actions/download-artifact@v6
+        with:
+          pattern: phase-${{ env.BENCHMARK_ID }}-*
+          path: phase-evidence
+      - name: Publish the gRPC Bazel benchmark report
+        run: |
+          python3 ./scripts/benchmark-report.py summarize \
+            --benchmark "$BENCHMARK_ID" \
+            --title "gRPC Bazel fresh benchmark" \
+            --input-dir phase-evidence \
+            --output-dir benchmark-results
+      - name: Retain the BoringCache fresh result
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache-fresh
+          path: benchmark-results/${{ env.BENCHMARK_ID }}-boringcache-fresh.json
+          if-no-files-found: error
+      - name: Retain the GitHub Actions fresh result
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache-fresh
+          path: benchmark-results/${{ env.BENCHMARK_ID }}-actions-cache-fresh.json
+          if-no-files-found: error
+      - name: Retain the BuildBuddy fresh result
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-buildbuddy-fresh
+          path: benchmark-results/${{ env.BENCHMARK_ID }}-buildbuddy-fresh.json
+          if-no-files-found: error
