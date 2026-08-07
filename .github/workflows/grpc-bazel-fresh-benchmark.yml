@@ -63,7 +63,6 @@ jobs:
       - name: Publish the gRPC Bazel benchmark report
         run: |
           python3 ./scripts/benchmark-report.py summarize \
-            --benchmark "$BENCHMARK_ID" \
             --title "gRPC Bazel fresh benchmark" \
             --input-dir phase-evidence \
             --output-dir benchmark-results
