@@ -19,7 +19,6 @@ env:
   BAZEL_OUTPUT_USER_ROOT: /tmp/boringcache-grpc-bazel/output-root
   BAZEL_OUTPUT_BASE: /tmp/boringcache-grpc-bazel/output-base
   BAZEL_DISK_CACHE: /tmp/boringcache-grpc-bazel/disk-cache
-  BAZEL_TARGET: "//examples/cpp/csm:csm_greeter_client"
   BENCHMARK_ID: ${{ format('grpc-bazel{0}', inputs.benchmark_id_suffix) }}
 jobs:
   cold:

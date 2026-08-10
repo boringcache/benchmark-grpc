@@ -4,12 +4,17 @@ set -euo pipefail
 strategy="${BAZEL_CACHE_STRATEGY:?BAZEL_CACHE_STRATEGY must be set}"
 output_root="${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set}"
 output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
-target="${BAZEL_TARGET:?BAZEL_TARGET must be set}"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mapfile -d '' plan < <(python3 "${repo_root}/scripts/run-benchmark-plan.py" bazel --print0)
+
+if [[ "${plan[*]}" != "./tools/bazel build --config=opt //test/..." ]]; then
+  echo "Unexpected gRPC Bazel benchmark plan: ${plan[*]}" >&2
+  exit 2
+fi
 
 args=(
   "--output_user_root=${output_root}"
   "--output_base=${output_base}"
-  build
 )
 
 case "$strategy" in
@@ -41,16 +46,4 @@ case "$strategy" in
     ;;
 esac
 
-args+=("$target")
-
-for attempt in 1 2 3; do
-  if (cd upstream && ./tools/bazel "${args[@]}"); then
-    exit 0
-  fi
-  if [[ "$attempt" -eq 3 ]]; then
-    echo "Bazel build failed after ${attempt} attempts" >&2
-    exit 1
-  fi
-  echo "Bazel build failed (attempt ${attempt}/3); retrying..." >&2
-  sleep 5
-done
+exec "${repo_root}/upstream/${plan[0]#./}" "${args[@]}" "${plan[@]:1}"
