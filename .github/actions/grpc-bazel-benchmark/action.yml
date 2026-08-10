@@ -80,6 +80,7 @@ runs:
         setup: none
         mode: bazel
         trust-policy: publish
+        working-directory: upstream
         fail-on-cache-error: true
         metadata-hints: benchmark=${{ inputs.benchmark_id }},phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'fresh-cold' }}
     - name: Configure BoringCache restore
@@ -91,6 +92,7 @@ runs:
         setup: none
         mode: bazel
         trust-policy: restore
+        working-directory: upstream
         fail-on-cache-miss: true
         fail-on-cache-error: true
         metadata-hints: benchmark=${{ inputs.benchmark_id }},phase=fresh-warm

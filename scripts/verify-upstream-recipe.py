@@ -25,7 +25,11 @@ def main() -> int:
         require("tools/bazel build --config=opt //test/..." in upstream, "upstream Bazel command changed")
         runner = (ROOT / "scripts/run-grpc-bazel-build.sh").read_text()
         require("run-benchmark-plan.py\" bazel --print0" in runner, "runner bypasses the committed plan")
+        require('cd "${repo_root}/upstream"' in runner, "runner must execute inside the Bazel workspace")
+        require('"${plan[1]}"' in runner and '"${build_args[@]}"' in runner, "cache flags must follow the build command")
         require("for attempt" not in runner, "runner must not add non-upstream retries")
+        action = (ROOT / ".github/actions/grpc-bazel-benchmark/action.yml").read_text()
+        require(action.count("working-directory: upstream") == 2, "BoringCache must configure the upstream Bazel workspace")
     except (KeyError, OSError, RuntimeError, tomllib.TOMLDecodeError) as error:
         print(f"gRPC recipe mismatch: {error}", file=sys.stderr)
         return 1
