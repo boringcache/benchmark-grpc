@@ -29,6 +29,12 @@ def main() -> int:
         require("python3 --version" in upstream, "upstream Python check changed")
         require(port_server in upstream, "upstream port-server command changed")
         require("tools/bazel build --config=opt //test/..." in upstream, "upstream Bazel command changed")
+        preparation = (ROOT / "scripts/prepare-source.sh").read_text()
+        require(".bazelrc" not in preparation, "benchmark must let upstream choose Bazel module mode")
+        require(
+            "grpc_python_deps.bzl" not in preparation,
+            "benchmark must not patch upstream dependency sources",
+        )
         runner = (ROOT / "scripts/run-grpc-bazel-build.sh").read_text()
         require("run-benchmark-plan.py\" bazel --print0" in runner, "runner bypasses the committed plan")
         require('cd "${repo_root}/upstream"' in runner, "runner must execute inside the Bazel workspace")
