@@ -16,26 +16,4 @@ case "${scenario}" in
     ;;
 esac
 
-REPO_ROOT="${repo_root}" python3 - <<'PY'
-import os
-from pathlib import Path
-
-path = Path(os.environ["REPO_ROOT"]) / "upstream/bazel/grpc_python_deps.bzl"
-text = path.read_text()
-old = '            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",'
-new = '''            urls = [
-                "https://github.com/bazel-contrib/rules_python/releases/download/1.6.3/rules_python-1.6.3.tar.gz",
-                "https://github.com/bazel-contrib/rules_python/archive/refs/tags/1.6.3.tar.gz",
-            ],'''
-if old in text:
-    path.write_text(text.replace(old, new, 1))
-PY
-
-if ! grep -Fq 'common --enable_bzlmod=false' "${HOME}/.bazelrc" 2>/dev/null; then
-  echo 'common --enable_bzlmod=false' >> "${HOME}/.bazelrc"
-fi
-if ! grep -Fq 'common --enable_workspace=true' "${HOME}/.bazelrc" 2>/dev/null; then
-  echo 'common --enable_workspace=true' >> "${HOME}/.bazelrc"
-fi
-
 git -C "${repo_root}/upstream" status --short
