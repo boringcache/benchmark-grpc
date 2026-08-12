@@ -10,6 +10,9 @@ on:
     branches: [main]
     paths: [".gitmodules", "upstream"]
 permissions: {contents: read, actions: write}
+concurrency:
+  group: grpc-bazel-rolling-${{ github.ref }}-${{ inputs.benchmark_id_suffix || 'default' }}
+  cancel-in-progress: true
 env:
   BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
   BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
@@ -24,7 +27,7 @@ jobs:
     name: ${{ matrix.provider }} gRPC Bazel commit
     if: inputs.runner_label == '' || github.ref_name == 'main'
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-latest' }}
-    timeout-minutes: 300
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

@@ -11,6 +11,9 @@ on:
   pull_request:
     paths: [".boringcache.toml", ".gitmodules", ".github/actions/grpc-bazel-benchmark/**", ".github/workflows/grpc-bazel-benchmark.yml", ".github/workflows/grpc-bazel-fresh-benchmark.yml", "scripts/**", "upstream"]
 permissions: {contents: read, actions: write}
+concurrency:
+  group: grpc-bazel-fresh-${{ github.ref }}-${{ inputs.benchmark_id_suffix || 'default' }}
+  cancel-in-progress: true
 env:
   BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
   BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
@@ -25,7 +28,7 @@ jobs:
     name: ${{ matrix.provider }} gRPC Bazel cold
     if: inputs.runner_label == '' || github.ref_name == 'main'
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-latest' }}
-    timeout-minutes: 300
+    timeout-minutes: 45
     strategy: &provider_strategy
       fail-fast: false
       matrix:
@@ -41,7 +44,7 @@ jobs:
     name: ${{ matrix.provider }} gRPC Bazel warm
     needs: cold
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-latest' }}
-    timeout-minutes: 300
+    timeout-minutes: 45
     strategy: *provider_strategy
     steps:
       - uses: actions/checkout@v6

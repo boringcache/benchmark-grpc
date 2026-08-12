@@ -7,10 +7,24 @@ output_base="${BAZEL_OUTPUT_BASE:?BAZEL_OUTPUT_BASE must be set}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mapfile -d '' plan < <(python3 "${repo_root}/scripts/run-benchmark-plan.py" bazel --print0)
 
-if [[ "${plan[*]}" != "./tools/bazel build --config=opt //test/..." ]]; then
+expected=(
+  "./tools/bazel"
+  "build"
+  "--config=opt"
+  "//examples/cpp/csm:csm_greeter_client"
+  "//examples/cpp/csm:csm_greeter_server"
+)
+
+if (( ${#plan[@]} != ${#expected[@]} )); then
   echo "Unexpected gRPC Bazel benchmark plan: ${plan[*]}" >&2
   exit 2
 fi
+for index in "${!expected[@]}"; do
+  if [[ "${plan[$index]}" != "${expected[$index]}" ]]; then
+    echo "Unexpected gRPC Bazel benchmark plan: ${plan[*]}" >&2
+    exit 2
+  fi
+done
 
 startup_args=(
   "--output_user_root=${output_root}"
