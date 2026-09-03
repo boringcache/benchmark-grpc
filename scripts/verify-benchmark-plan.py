@@ -56,16 +56,16 @@ def main() -> int:
         require("start_port_server.py" not in action, "build-only benchmark must not start the test port server")
         require("sudo apt" not in action, "benchmark must not include test-suite package setup")
         require(action.count("working-directory: upstream") == 2, "cache setup must use the upstream Bazel workspace")
-        for workflow_name, bounded_jobs in (
-            ("grpc-bazel-benchmark.yml", 1),
-            ("grpc-bazel-fresh-benchmark.yml", 2),
+        for workflow_name, timeout_minutes, bounded_jobs in (
+            ("grpc-bazel-benchmark.yml", 45, 1),
+            ("grpc-bazel-fresh-benchmark.yml", 90, 2),
         ):
             workflow = (ROOT / ".github/workflows" / workflow_name).read_text()
             require("cancel-in-progress: true" in workflow, f"{workflow_name} must cancel stale runs")
             require("timeout-minutes: 300" not in workflow, f"{workflow_name} still allows five-hour jobs")
             require(
-                workflow.count("timeout-minutes: 45") == bounded_jobs,
-                f"{workflow_name} must give each build job a 45-minute bound",
+                workflow.count(f"timeout-minutes: {timeout_minutes}") == bounded_jobs,
+                f"{workflow_name} must give each build job a {timeout_minutes}-minute bound",
             )
     except (KeyError, OSError, RuntimeError, tomllib.TOMLDecodeError) as error:
         print(f"gRPC benchmark plan mismatch: {error}", file=sys.stderr)
