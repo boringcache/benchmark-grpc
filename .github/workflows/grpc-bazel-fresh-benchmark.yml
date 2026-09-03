@@ -28,7 +28,7 @@ jobs:
     name: ${{ matrix.provider }} gRPC Bazel cold
     if: inputs.runner_label == '' || github.ref_name == 'main'
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy: &provider_strategy
       fail-fast: false
       matrix:
@@ -44,7 +44,7 @@ jobs:
     name: ${{ matrix.provider }} gRPC Bazel warm
     needs: cold
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy: *provider_strategy
     steps:
       - uses: actions/checkout@v6
