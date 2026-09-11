@@ -1,0 +1,6 @@
+build:cachely --remote_cache=https://remote.cachely.dev
+build:cachely --remote_upload_local_results=false
+build:cachely-ci --remote_upload_local_results=true
+
+# Bazel runs in the upstream submodule; credentials belong to this harness.
+try-import %workspace%/../user.bazelrc

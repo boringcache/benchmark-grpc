@@ -108,6 +108,8 @@ runs:
         BAZEL_CACHE_STRATEGY: ${{ inputs.strategy }}
         BUILDBUDDY_REMOTE_INSTANCE_NAME: ${{ steps.scope.outputs.buildbuddy_instance }}
         BUILDBUDDY_REMOTE_UPLOAD_LOCAL_RESULTS: ${{ inputs.phase == 'warm' && 'false' || 'true' }}
+        CACHELY_REMOTE_UPLOAD_LOCAL_RESULTS: ${{ inputs.phase == 'publish' && github.event_name != 'pull_request' && 'true' || 'false' }}
+        CACHELY_REMOTE_ACCEPT_CACHED: ${{ inputs.cache_lane == 'fresh' && inputs.phase == 'publish' && 'false' || 'true' }}
       run: ./scripts/run-grpc-bazel-build.sh
     - name: Capture the build timing
       id: build_timing

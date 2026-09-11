@@ -1,2 +1,4 @@
 boringcache-bin
 .DS_Store
+.env
+user.bazelrc

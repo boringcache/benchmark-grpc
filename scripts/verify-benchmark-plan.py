@@ -58,7 +58,7 @@ def main() -> int:
         require(action.count("working-directory: upstream") == 2, "cache setup must use the upstream Bazel workspace")
         for workflow_name, timeout_minutes, bounded_jobs in (
             ("grpc-bazel-benchmark.yml", 45, 1),
-            ("grpc-bazel-fresh-benchmark.yml", 90, 2),
+            ("grpc-bazel-fresh-benchmark.yml", 90, 4),
         ):
             workflow = (ROOT / ".github/workflows" / workflow_name).read_text()
             require("cancel-in-progress: true" in workflow, f"{workflow_name} must cancel stale runs")

@@ -53,6 +53,17 @@ case "$strategy" in
       build_args+=("--remote_upload_local_results=false")
     fi
     ;;
+  cachely)
+    python3 "${repo_root}/scripts/configure-cachely.py"
+    startup_args+=("--bazelrc=${repo_root}/.bazelrc")
+    build_args+=(
+      "--config=cachely"
+      "--remote_accept_cached=${CACHELY_REMOTE_ACCEPT_CACHED:-true}"
+    )
+    if [[ "${CACHELY_REMOTE_UPLOAD_LOCAL_RESULTS:-false}" == "true" ]]; then
+      build_args+=("--config=cachely-ci")
+    fi
+    ;;
   boringcache)
     ;;
   *)

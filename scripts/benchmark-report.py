@@ -26,6 +26,7 @@ PROVIDER_LABELS = {
     "boringcache-turbo": "BoringCache Turbo",
     "buildbuddy": "BuildBuddy",
     "buildbuddy-cache": "BuildBuddy",
+    "cachely": "Cachely",
     "ecr-cache": "Amazon ECR",
 }
 
