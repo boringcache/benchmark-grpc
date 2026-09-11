@@ -11,6 +11,17 @@ expected=(
   "./tools/bazel"
   "build"
   "--config=opt"
+  "--remote_download_outputs=toplevel"
+  "--remote_cache_async=false"
+  "--remote_max_connections=64"
+  "--remote_timeout=10m"
+  "--incompatible_strict_action_env"
+  "--action_env=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  "--host_action_env=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  "--repo_env=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  "--repo_env=CC=/usr/bin/gcc"
+  "--repo_env=CXX=/usr/bin/g++"
+  "--repo_env=LD=/usr/bin/ld"
   "//examples/cpp/csm:csm_greeter_client"
   "//examples/cpp/csm:csm_greeter_server"
 )
@@ -45,7 +56,6 @@ case "$strategy" in
       "--bes_results_url=https://app.buildbuddy.io/invocation/"
       "--bes_backend=grpcs://remote.buildbuddy.io"
       "--remote_cache=grpcs://remote.buildbuddy.io"
-      "--remote_timeout=10m"
       "--remote_instance_name=${instance}"
       "--remote_header=x-buildbuddy-api-key=${api_key}"
     )
@@ -73,6 +83,7 @@ case "$strategy" in
 esac
 
 cd "${repo_root}/upstream"
+printf 'Shared Bazel build plan: %s\n' "${plan[*]}"
 exec "${plan[0]}" \
   "${startup_args[@]}" \
   "${plan[1]}" \

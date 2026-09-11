@@ -25,6 +25,8 @@ BAZEL_OUTPUT_BASE=/tmp/grpc-cachely/output-base \
 Use the harness's usual prerequisites, including Bash with `mapfile`,
 Python 3.11 or later, and the upstream gRPC build dependencies. The source
 submodule must be initialized before a local build.
+All providers use the [shared Linux Bazel settings](comparison.md), including
+the compiler paths and `toplevel` output-download policy.
 
 Local uploads default to disabled. Trusted CI publishing phases set
 `CACHELY_REMOTE_UPLOAD_LOCAL_RESULTS=true`, which selects `cachely-ci`.
@@ -36,6 +38,8 @@ pair because the configured token can write.
 Cachely uses the token's shared workspace, without a per-run server namespace.
 Disabling reads makes the cold build execute locally; it does not empty the
 remote cache or isolate stored bytes. Inspect native cache-hit evidence before
-treating a warm timing as a cache-reuse measurement. Workflow artifacts are
-named `benchmark-grpc-bazel-cachely-fresh` and
-`benchmark-grpc-bazel-cachely-rolling` (with any requested benchmark suffix).
+treating a warm timing as a cache-reuse measurement. The Cachely fresh artifact
+is named `benchmark-grpc-bazel-cachely-fresh` (with any requested benchmark
+suffix). The rolling workflow deliberately excludes Cachely so the
+token-backed fresh comparison stays separate from the normal rolling
+comparison.

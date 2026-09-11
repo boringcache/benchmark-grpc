@@ -34,13 +34,10 @@ jobs:
         include:
           - {provider: GitHub Actions, strategy: actions-cache}
           - {provider: BuildBuddy, strategy: buildbuddy}
-          - {provider: Cachely, strategy: cachely}
           - {provider: BoringCache, strategy: boringcache}
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/grpc-bazel-benchmark
-        env:
-          CACHELY_TOKEN: ${{ matrix.strategy == 'cachely' && secrets.CACHELY_TOKEN || '' }}
         with: {strategy: "${{ matrix.strategy }}", cache_lane: rolling, phase: publish, benchmark_id: "${{ format('grpc-bazel{0}', inputs.benchmark_id_suffix) }}", cli_version: "${{ inputs.cli_version }}"}
   report:
     name: gRPC Bazel rolling report
@@ -77,10 +74,4 @@ jobs:
         with:
           name: benchmark-${{ env.BENCHMARK_ID }}-buildbuddy-rolling
           path: benchmark-results/${{ env.BENCHMARK_ID }}-buildbuddy-rolling.json
-          if-no-files-found: error
-      - name: Retain the Cachely rolling result
-        uses: actions/upload-artifact@v6
-        with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-cachely-rolling
-          path: benchmark-results/${{ env.BENCHMARK_ID }}-cachely-rolling.json
           if-no-files-found: error

@@ -13,6 +13,17 @@ EXPECTED = [
     "./tools/bazel",
     "build",
     "--config=opt",
+    "--remote_download_outputs=toplevel",
+    "--remote_cache_async=false",
+    "--remote_max_connections=64",
+    "--remote_timeout=10m",
+    "--incompatible_strict_action_env",
+    "--action_env=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "--host_action_env=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "--repo_env=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "--repo_env=CC=/usr/bin/gcc",
+    "--repo_env=CXX=/usr/bin/g++",
+    "--repo_env=LD=/usr/bin/ld",
     "//examples/cpp/csm:csm_greeter_client",
     "//examples/cpp/csm:csm_greeter_server",
 ]
@@ -50,8 +61,8 @@ def main() -> int:
         require('cd "${repo_root}/upstream"' in runner, "runner must execute inside the Bazel workspace")
         require('"${plan[1]}"' in runner and '"${build_args[@]}"' in runner, "cache flags must follow the build command")
         require("for attempt" not in runner, "runner must not add retries")
-        for target in EXPECTED[3:]:
-            require(target in runner, f"runner guard omits {target}")
+        for argument in EXPECTED[2:]:
+            require(argument in runner, f"runner guard omits {argument}")
         action = (ROOT / ".github/actions/grpc-bazel-benchmark/action.yml").read_text()
         require("start_port_server.py" not in action, "build-only benchmark must not start the test port server")
         require("sudo apt" not in action, "benchmark must not include test-suite package setup")
@@ -67,6 +78,10 @@ def main() -> int:
                 workflow.count(f"timeout-minutes: {timeout_minutes}") == bounded_jobs,
                 f"{workflow_name} must give each build job a {timeout_minutes}-minute bound",
             )
+        rolling = (ROOT / ".github/workflows/grpc-bazel-benchmark.yml").read_text()
+        fresh = (ROOT / ".github/workflows/grpc-bazel-fresh-benchmark.yml").read_text()
+        require("provider: Cachely" not in rolling, "rolling workflow must keep Cachely separate")
+        require("cachely-cold:" in fresh and "cachely-warm:" in fresh, "fresh workflow must retain Cachely pair")
     except (KeyError, OSError, RuntimeError, tomllib.TOMLDecodeError) as error:
         print(f"gRPC benchmark plan mismatch: {error}", file=sys.stderr)
         return 1
